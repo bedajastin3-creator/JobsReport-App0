@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -50,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.JobOpportunity
+import com.example.data.isJobExpired
 import com.example.state.AppViewModel
 import com.example.state.NavRoute
 import com.example.ui.components.JobsPagination
@@ -57,8 +59,11 @@ import com.example.ui.theme.AmberYellow
 import com.example.ui.theme.BgCard
 import com.example.ui.theme.BgDeep
 import com.example.ui.theme.BorderWhite10
+import com.example.ui.theme.BorderWhite5
+import com.example.ui.theme.DangerRed
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.LightBlue
+import com.example.ui.theme.PrimaryBlue
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
@@ -259,130 +264,170 @@ private fun CategoryJobCard(
     onToggleSave: () -> Unit = {},
     onClick: () -> Unit
 ) {
+    val isExpired = job.isJobExpired()
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(BgCard)
-            .border(1.dp, BorderWhite10, RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (isExpired) BgCard.copy(alpha = 0.6f) else BgCard)
+            .border(1.dp, if (isExpired) BorderWhite5 else BorderWhite10, RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
-            .padding(16.dp)
+            .padding(14.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (!job.logoUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = job.logoUrl,
-                    contentDescription = job.company,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(BgDeep)
-                        .border(1.dp, BorderWhite10, RoundedCornerShape(12.dp))
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(BgDeep)
-                        .border(1.dp, BorderWhite10, RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Row 1: Logo + (Title & Company) + Bookmark Button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                // Logo or Fallback Monogram
+                if (!job.logoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = job.logoUrl,
+                        contentDescription = job.company,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(BgDeep)
+                            .border(1.dp, BorderWhite10, RoundedCornerShape(10.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(PrimaryBlue.copy(alpha = 0.2f))
+                            .border(1.dp, PrimaryBlue.copy(alpha = 0.3f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = job.company.take(1).uppercase(),
+                            color = LightBlue,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Title + Company Name
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     Text(
-                        text = job.company.take(1).uppercase(),
-                        color = TextMuted,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
+                        text = job.title,
+                        color = if (isExpired) TextSecondary else TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = job.company,
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Bookmark action
+                IconButton(
+                    onClick = onToggleSave,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                        contentDescription = if (isSaved) "Remove from Saved Jobs" else "Save Job",
+                        tint = if (isSaved) AmberYellow else TextMuted,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
 
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+            // Row 2: Role / Category Badge & Post time
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                if (!job.role.isNullOrBlank()) {
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(LightBlue.copy(alpha = 0.15f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .background(if (isExpired) DangerRed.copy(alpha = 0.15f) else PrimaryBlue.copy(alpha = 0.15f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            text = (job.role ?: "General").uppercase(),
-                            color = LightBlue,
-                            fontSize = 8.sp,
+                            text = if (isExpired) "EXPIRED" else job.role.uppercase(),
+                            color = if (isExpired) DangerRed else LightBlue,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-
-                    IconButton(
-                        onClick = onToggleSave,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                            contentDescription = if (isSaved) "Remove from Saved Jobs" else "Save Job",
-                            tint = if (isSaved) AmberYellow else TextMuted,
-                            modifier = Modifier.size(18.dp)
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
-                Text(
-                    text = job.title,
-                    color = TextPrimary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Business,
-                            contentDescription = "Company",
-                            tint = TextMuted,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = job.company,
-                            color = TextMuted,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!job.postedAt.isNullOrBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
                         Icon(
                             imageVector = Icons.Default.LocationOn,
                             contentDescription = "Location",
                             tint = TextMuted,
-                            modifier = Modifier.size(12.dp)
+                            modifier = Modifier.size(11.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = job.location ?: "Remote",
+                            text = job.postedAt,
                             color = TextMuted,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1
                         )
                     }
+                }
+            }
+
+            // Divider
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(BorderWhite5)
+            )
+
+            // Row 3: Location (Left) + Salary or Signal ID (Right)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f, fill = false),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = "Location",
+                        tint = TextMuted,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Text(
+                        text = job.location ?: "Remote",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
 
                 if (!job.salary.isNullOrBlank()) {
@@ -392,7 +437,15 @@ private fun CategoryJobCard(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(top = 2.dp)
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else {
+                    Text(
+                        text = "JR-${job.id.takeLast(4).uppercase()}",
+                        color = TextMuted,
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace
                     )
                 }
             }

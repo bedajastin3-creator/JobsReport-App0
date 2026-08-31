@@ -13,7 +13,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.jobsreport.v9x2k.gjfqqt"
+    applicationId = "co.jobsreport.ap"
     minSdk = 24
     targetSdk = 36
     versionCode = 1

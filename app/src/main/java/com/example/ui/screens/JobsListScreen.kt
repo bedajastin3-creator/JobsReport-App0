@@ -548,143 +548,76 @@ private fun MarketJobCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(18.dp))
             .background(if (isExpired) BgCard.copy(alpha = 0.6f) else BgCard)
-            .border(1.dp, if (isExpired) BorderWhite5 else BorderWhite10, RoundedCornerShape(20.dp))
+            .border(1.dp, if (isExpired) BorderWhite5 else BorderWhite10, RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
-            .padding(16.dp)
+            .padding(14.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            // Header Row: Logo, Title, Role Tag, Time & Save Button
+            // Row 1: Logo + (Title & Company) + Bookmark Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top
             ) {
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    if (!job.logoUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = job.logoUrl,
-                            contentDescription = job.company,
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(BgDeep),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(PrimaryBlue.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = job.company.take(1).uppercase(),
-                                color = LightBlue,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(if (isExpired) DangerRed.copy(alpha = 0.15f) else PrimaryBlue.copy(alpha = 0.15f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = if (isExpired) "EXPIRED" else (job.role ?: "GENERAL").uppercase(),
-                                    color = if (isExpired) DangerRed else LightBlue,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Schedule,
-                                    contentDescription = "Time",
-                                    tint = TextMuted,
-                                    modifier = Modifier.size(10.dp)
-                                )
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text(
-                                    text = job.postedAt ?: "Recent",
-                                    color = TextMuted,
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
+                // Logo or Fallback Monogram
+                if (!job.logoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = job.logoUrl,
+                        contentDescription = job.company,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(BgDeep)
+                            .border(1.dp, BorderWhite10, RoundedCornerShape(10.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(PrimaryBlue.copy(alpha = 0.2f))
+                            .border(1.dp, PrimaryBlue.copy(alpha = 0.3f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            text = job.title,
-                            color = if (isExpired) TextSecondary else TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            text = job.company.take(1).uppercase(),
+                            color = LightBlue,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
                         )
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = job.company,
-                                color = TextSecondary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            if (!job.location.isNullOrBlank()) {
-                                Text(text = "•", color = TextMuted, fontSize = 10.sp)
-                                Icon(
-                                    imageVector = Icons.Default.LocationOn,
-                                    contentDescription = "Location",
-                                    tint = TextMuted,
-                                    modifier = Modifier.size(11.dp)
-                                )
-                                Text(
-                                    text = job.location,
-                                    color = TextMuted,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-
-                        if (!job.salary.isNullOrBlank()) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = job.salary,
-                                color = EmeraldGreen,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
                     }
                 }
 
-                // Save / Bookmark Icon Button
+                // Title + Company Name
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = job.title,
+                        color = if (isExpired) TextSecondary else TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = job.company,
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Bookmark action
                 IconButton(
                     onClick = onToggleSave,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
                         imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
@@ -695,7 +628,52 @@ private fun MarketJobCard(
                 }
             }
 
-            // Divider & Bottom Signal Identifier
+            // Row 2: Role / Category Badge & Post time / Expiry
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!job.role.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isExpired) DangerRed.copy(alpha = 0.15f) else PrimaryBlue.copy(alpha = 0.15f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = if (isExpired) "EXPIRED" else job.role.uppercase(),
+                            color = if (isExpired) DangerRed else LightBlue,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Schedule,
+                        contentDescription = "Time",
+                        tint = TextMuted,
+                        modifier = Modifier.size(11.dp)
+                    )
+                    Text(
+                        text = job.postedAt ?: "Recent",
+                        color = TextMuted,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            // Divider
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -703,24 +681,46 @@ private fun MarketJobCard(
                     .background(BorderWhite5)
             )
 
+            // Row 3: Location (Left) + Salary or Signal ID (Right)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "SIGNAL: JR-${job.id.takeLast(4).uppercase()}",
-                    color = TextMuted,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 0.8.sp
-                )
-
-                if (!job.expiresAt.isNullOrBlank()) {
+                Row(
+                    modifier = Modifier.weight(1f, fill = false),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = "Location",
+                        tint = TextMuted,
+                        modifier = Modifier.size(12.dp)
+                    )
                     Text(
-                        text = if (isExpired) "Expired: ${job.expiresAt}" else "Expires: ${job.expiresAt}",
-                        color = if (isExpired) DangerRed.copy(alpha = 0.8f) else TextMuted,
+                        text = job.location ?: "Remote",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                if (!job.salary.isNullOrBlank()) {
+                    Text(
+                        text = job.salary,
+                        color = EmeraldGreen,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else {
+                    Text(
+                        text = "JR-${job.id.takeLast(4).uppercase()}",
+                        color = TextMuted,
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace
                     )

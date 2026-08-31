@@ -1,4 +1,4 @@
-name: Build APK
+name: Build & Sign Android App (AAB & APK)
 
 on:
   push:
@@ -8,10 +8,11 @@ on:
 
 jobs:
   build:
+    name: Build & Sign Release AAB and APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout source code
         uses: actions/checkout@v4
 
       - name: Set up JDK 21
@@ -29,11 +30,59 @@ jobs:
           gradle-version: 9.3.1
           validate-wrappers: false
 
-      - name: Build Debug APK
-        run: gradle assembleDebug --stacktrace
+      - name: Setup Keystore for Signing
+        id: setup-keystore
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "Using base64 keystore from GitHub Secrets..."
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > release.keystore
+            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/release.keystore" >> $GITHUB_ENV
+          elif [ -f "my-upload-key.jks" ]; then
+            echo "Using my-upload-key.jks from repository..."
+            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/my-upload-key.jks" >> $GITHUB_ENV
+          else
+            echo "Generating production release keystore with alias upload..."
+            keytool -genkeypair -v \
+              -keystore release.keystore \
+              -alias "${KEY_ALIAS}" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "${STORE_PASSWORD}" \
+              -keypass "${KEY_PASSWORD}" \
+              -dname "CN=JobsReport, OU=App, O=JobsReport, L=Dar es Salaam, ST=Dar es Salaam, C=TZ"
+            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/release.keystore" >> $GITHUB_ENV
+          fi
+        env:
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'upload' }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD || secrets.KEYSTORE_PASSWORD || '52775277Tanzania' }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || '52775277Tanzania' }}
 
-      - name: Upload APK
+      - name: Build Release Bundle (AAB), Release APK & Debug APK
+        run: gradle bundleRelease assembleRelease assembleDebug --stacktrace
+        env:
+          KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD || secrets.KEYSTORE_PASSWORD || '52775277Tanzania' }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'upload' }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || '52775277Tanzania' }}
+
+      - name: Upload Signed Play Store Bundle (.AAB)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab
+          path: app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+      - name: Upload Signed Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: warn
+
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn

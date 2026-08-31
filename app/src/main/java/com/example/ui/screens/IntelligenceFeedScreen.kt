@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.CircularProgressIndicator
@@ -64,6 +65,7 @@ import com.example.ads.NativeAdCard
 import com.example.data.JobCategory
 import com.example.data.JobOpportunity
 import com.example.data.MarketReport
+import com.example.data.isJobExpired
 import com.example.state.AppViewModel
 import com.example.state.NavRoute
 import com.example.ui.components.ReportCard
@@ -73,6 +75,7 @@ import com.example.ui.theme.BgCard
 import com.example.ui.theme.BgDeep
 import com.example.ui.theme.BorderWhite10
 import com.example.ui.theme.BorderWhite5
+import com.example.ui.theme.DangerRed
 import com.example.ui.theme.EmeraldGreen
 import com.example.ui.theme.LightBlue
 import com.example.ui.theme.PrimaryBlue
@@ -802,123 +805,161 @@ private fun JobCardItem(
     onToggleSave: () -> Unit = {},
     onClick: () -> Unit
 ) {
+    val isExpired = job.isJobExpired()
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(BgCard)
-            .border(1.dp, BorderWhite10, RoundedCornerShape(16.dp))
+            .background(if (isExpired) BgCard.copy(alpha = 0.6f) else BgCard)
+            .border(1.dp, if (isExpired) BorderWhite5 else BorderWhite10, RoundedCornerShape(16.dp))
             .clickable { onClick() }
             .padding(14.dp)
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Row 1: Logo + (Title & Company) + Bookmark Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    if (!job.logoUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = job.logoUrl,
-                            contentDescription = job.company,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(BgDeep),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(PrimaryBlue.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = job.company.take(1).uppercase(),
-                                color = LightBlue,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(10.dp))
-
-                    Column {
+                // Logo or Placeholder Initials
+                if (!job.logoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = job.logoUrl,
+                        contentDescription = job.company,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(BgDeep)
+                            .border(1.dp, BorderWhite10, RoundedCornerShape(10.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(PrimaryBlue.copy(alpha = 0.2f))
+                            .border(1.dp, PrimaryBlue.copy(alpha = 0.3f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            text = job.title,
-                            color = TextPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = job.company,
-                            color = TextMuted,
-                            fontSize = 11.sp
+                            text = job.company.take(1).uppercase(),
+                            color = LightBlue,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                // Title and Company
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
-                    if (!job.role.isNullOrBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(BgDeep)
-                                .border(1.dp, BorderWhite5, RoundedCornerShape(6.dp))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = job.role,
-                                color = LightBlue,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
+                    Text(
+                        text = job.title,
+                        color = if (isExpired) TextSecondary else TextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = job.company,
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
-                    IconButton(
-                        onClick = onToggleSave,
-                        modifier = Modifier.size(32.dp)
+                // Bookmark action
+                IconButton(
+                    onClick = onToggleSave,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                        contentDescription = if (isSaved) "Remove from Saved Jobs" else "Save Job",
+                        tint = if (isSaved) AmberYellow else TextMuted,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Row 2: Role / Category Badge & Post time
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!job.role.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isExpired) DangerRed.copy(alpha = 0.15f) else BgDeep)
+                            .border(1.dp, if (isExpired) DangerRed.copy(alpha = 0.3f) else BorderWhite5, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = if (isExpired) "EXPIRED" else job.role,
+                            color = if (isExpired) DangerRed else LightBlue,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                if (!job.postedAt.isNullOrBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Icon(
-                            imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                            contentDescription = if (isSaved) "Remove from Saved Jobs" else "Save Job",
-                            tint = if (isSaved) AmberYellow else TextMuted,
-                            modifier = Modifier.size(18.dp)
+                            imageVector = Icons.Default.Schedule,
+                            contentDescription = "Time",
+                            tint = TextMuted,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Text(
+                            text = job.postedAt,
+                            color = TextMuted,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1
                         )
                     }
                 }
             }
 
+            // Row 3: Location and Salary Footer
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f, fill = false),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     Icon(
                         imageVector = Icons.Default.LocationOn,
                         contentDescription = "Location",
                         tint = TextMuted,
                         modifier = Modifier.size(12.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = job.location ?: "Remote",
                         color = TextSecondary,
-                        fontSize = 11.sp
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
@@ -927,7 +968,10 @@ private fun JobCardItem(
                         text = job.salary,
                         color = EmeraldGreen,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
