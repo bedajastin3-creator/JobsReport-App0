@@ -219,6 +219,9 @@ fun TechnicalFooter(viewModel: AppViewModel? = null) {
                         FooterLinkItem(label = "Job Regions") {
                             viewModel?.navigateTo(NavRoute.REGIONS)
                         }
+                        FooterLinkItem(label = "Job Stories") {
+                            viewModel?.navigateTo(NavRoute.STORIES)
+                        }
                         FooterLinkItem(label = "Market Reports") {
                             viewModel?.navigateTo(NavRoute.JOB_REPORTS)
                         }

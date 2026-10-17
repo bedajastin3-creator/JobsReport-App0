@@ -20,7 +20,9 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
+import coil.compose.AsyncImage
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -105,44 +107,52 @@ fun HeaderNav(
             }
         }
 
-        // Actions
+        // Actions: Global icon, Menu icon, Save icon, Auth icon
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Country Selector Button
-            Row(
+            // 1. Country Selector (Global Icon only - no "Worldwide" text)
+            Box(
                 modifier = Modifier
-                    .height(36.dp)
-                    .clip(CircleShape)
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
                     .background(BgCard)
-                    .border(1.dp, BorderWhite10, CircleShape)
-                    .clickable { viewModel.isCountryDropdownOpen = true }
-                    .padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .border(1.dp, BorderWhite10, RoundedCornerShape(8.dp))
+                    .clickable { viewModel.isCountryDropdownOpen = true },
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Language,
                     contentDescription = "Country selector",
                     tint = LightBlue,
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = viewModel.currentFlag,
-                    fontSize = 13.sp
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = viewModel.selectedCountry,
-                    color = TextPrimary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
+                    modifier = Modifier.size(18.dp)
                 )
             }
 
-            // Quick Saved Jobs Bookmark Button
+            // 2. Mobile Menu / Hamburger Icon (Near save icon)
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (viewModel.isMobileMenuOpen) PrimaryBlue.copy(alpha = 0.2f) else BgCard)
+                    .border(
+                        1.dp,
+                        if (viewModel.isMobileMenuOpen) PrimaryBlue.copy(alpha = 0.5f) else BorderWhite10,
+                        RoundedCornerShape(8.dp)
+                    )
+                    .clickable { viewModel.isMobileMenuOpen = !viewModel.isMobileMenuOpen },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (viewModel.isMobileMenuOpen) Icons.Default.Close else Icons.Default.Menu,
+                    contentDescription = "Toggle Menu",
+                    tint = if (viewModel.isMobileMenuOpen) LightBlue else TextPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            // 3. Quick Saved Jobs Bookmark Button (Save icon)
             Box(
                 modifier = Modifier
                     .size(36.dp)
@@ -173,25 +183,45 @@ fun HeaderNav(
                     )
                 }
             }
-        }
 
-            // Mobile Menu / Hamburger (Three Lines) Icon Button
+            // 4. User Account / Profile / Sign In Button (Auth icon)
             Box(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(BgCard)
-                    .border(1.dp, BorderWhite10, RoundedCornerShape(8.dp))
-                    .clickable { viewModel.isMobileMenuOpen = !viewModel.isMobileMenuOpen },
+                    .background(if (viewModel.userToken != null) PrimaryBlue.copy(alpha = 0.2f) else BgCard)
+                    .border(
+                        1.dp,
+                        if (viewModel.userToken != null) PrimaryBlue.copy(alpha = 0.5f) else BorderWhite10,
+                        RoundedCornerShape(8.dp)
+                    )
+                    .clickable {
+                        if (viewModel.userToken != null) {
+                            viewModel.isUserProfileModalOpen = true
+                        } else {
+                            viewModel.openAuth()
+                        }
+                    },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = if (viewModel.isMobileMenuOpen) Icons.Default.Close else Icons.Default.Menu,
-                    contentDescription = "Toggle Menu",
-                    tint = TextPrimary,
-                    modifier = Modifier.size(20.dp)
-                )
+                if (viewModel.userToken != null && !viewModel.currentUser?.profileImageUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = viewModel.currentUser?.profileImageUrl,
+                        contentDescription = "User Profile",
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Account Sign In",
+                        tint = if (viewModel.userToken != null) LightBlue else TextPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }
+}
 }

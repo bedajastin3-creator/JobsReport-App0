@@ -8,13 +8,25 @@ import com.example.data.JobOpportunity
 import com.example.data.LocationInfo
 import com.example.data.MarketReport
 import com.example.data.MarketResponse
+import com.example.data.CreateStoryPayload
+import com.example.data.LoginPayload
+import com.example.data.RegisterPayload
+import com.example.data.ForgotPasswordPayload
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
+import okhttp3.ResponseBody
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
+import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Header
+import retrofit2.http.Multipart
+import retrofit2.http.POST
+import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
@@ -46,6 +58,46 @@ interface JobsReportApi {
 
     @GET("api/locations")
     suspend fun getLocations(): List<LocationInfo>
+
+    @GET("api/stories")
+    suspend fun getStoriesRaw(): ResponseBody
+
+    @GET("api/stories/{slug}")
+    suspend fun getStoryDetail(@Path("slug") slug: String): ResponseBody
+
+    @POST("api/stories/{id}/view")
+    suspend fun recordStoryView(@Path("id") id: String): ResponseBody
+
+    @POST("api/stories")
+    suspend fun createStory(
+        @Header("Authorization") auth: String?,
+        @Body payload: CreateStoryPayload
+    ): ResponseBody
+
+    @DELETE("api/stories/{id}")
+    suspend fun deleteStory(
+        @Header("Authorization") auth: String?,
+        @Path("id") id: String
+    ): ResponseBody
+
+    @Multipart
+    @POST("api/upload")
+    suspend fun uploadMedia(
+        @Header("Authorization") auth: String?,
+        @Part file: MultipartBody.Part,
+        @Part thumbnail: MultipartBody.Part?,
+        @Part name: MultipartBody.Part,
+        @Part altText: MultipartBody.Part
+    ): ResponseBody
+
+    @POST("api/auth/login")
+    suspend fun login(@Body payload: LoginPayload): ResponseBody
+
+    @POST("api/auth/register")
+    suspend fun register(@Body payload: RegisterPayload): ResponseBody
+
+    @POST("api/auth/forgot-password")
+    suspend fun forgotPassword(@Body payload: ForgotPasswordPayload): ResponseBody
 
     companion object {
         private const val BASE_URL = "https://jobsreport.online/"

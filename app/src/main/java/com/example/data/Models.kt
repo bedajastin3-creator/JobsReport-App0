@@ -851,3 +851,219 @@ val sampleCompanies = listOf(
         activeJobs = 10
     )
 )
+
+// ============================================================
+// STORY MODELS & TELEMETRY
+// ============================================================
+data class StoryUser(
+    @Json(name = "id") val id: String,
+    @Json(name = "name") val name: String,
+    @Json(name = "username") val username: String? = null,
+    @Json(name = "email") val email: String? = null,
+    @Json(name = "profile_image_url") val profileImageUrl: String? = null
+)
+
+data class StoryType(
+    @Json(name = "id") val id: String,
+    @Json(name = "user_id") val userId: String,
+    @Json(name = "slug") val slug: String = "",
+    @Json(name = "type") val type: String = "text",
+    @Json(name = "media_url") val mediaUrl: String? = null,
+    @Json(name = "media_thumb") val mediaThumb: String? = null,
+    @Json(name = "text_content") val textContent: String? = null,
+    @Json(name = "background_style") val backgroundStyle: String? = null,
+    @Json(name = "created_at") val createdAt: String,
+    @Json(name = "expires_at") val expiresAt: String,
+    @Json(name = "is_active") val isActive: Any? = 1,
+    @Json(name = "views_count") val viewsCount: Int? = 0,
+    @Json(name = "user") val user: StoryUser? = null
+)
+
+data class CreateStoryPayload(
+    @Json(name = "type") val type: String,
+    @Json(name = "media_url") val mediaUrl: String? = null,
+    @Json(name = "media_thumb") val mediaThumb: String? = null,
+    @Json(name = "text_content") val textContent: String? = null,
+    @Json(name = "background_style") val backgroundStyle: String? = null,
+    @Json(name = "expires_at") val expiresAt: String
+)
+
+data class StoriesResponse(
+    @Json(name = "stories") val stories: List<StoryType>? = null
+)
+
+data class UploadResponse(
+    @Json(name = "url") val url: String? = null,
+    @Json(name = "thumbnail_url") val thumbnailUrl: String? = null,
+    @Json(name = "dataUrl") val dataUrl: String? = null,
+    @Json(name = "error") val error: String? = null
+)
+
+val STORY_BACKGROUNDS = listOf(
+    "linear-gradient(135deg, #1877F2, #0055FF)",
+    "linear-gradient(135deg, #F3425F, #E41E3F)",
+    "linear-gradient(135deg, #45BD62, #31A24C)",
+    "linear-gradient(135deg, #F7B928, #E3A300)",
+    "linear-gradient(135deg, #A033FF, #7B1FA2)",
+    "linear-gradient(135deg, #FF7E5F, #FEB47B)",
+    "linear-gradient(135deg, #00C6FF, #0072FF)",
+    "linear-gradient(135deg, #2193b0, #6dd5ed)",
+    "linear-gradient(135deg, #42275a, #734b6d)",
+    "linear-gradient(135deg, #000000, #434343)"
+)
+
+fun parseStoryServerTime(value: String?): Long {
+    val s = value?.trim().orEmpty()
+    if (s.isEmpty()) return System.currentTimeMillis()
+    return try {
+        if (s.contains("T")) {
+            val iso = if (!s.endsWith("Z") && !s.contains("+") && !s.substring(10).contains("-")) s + "Z" else s
+            java.time.Instant.parse(iso).toEpochMilli()
+        } else if (s.matches(Regex("""^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.*"""))) {
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            sdf.parse(s)?.time ?: System.currentTimeMillis()
+        } else {
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+            sdf.parse(s.take(10))?.time ?: System.currentTimeMillis()
+        }
+    } catch (_: Exception) {
+        System.currentTimeMillis()
+    }
+}
+
+fun formatStoryTime(createdAt: String?): String {
+    val t = parseStoryServerTime(createdAt)
+    val diff = System.currentTimeMillis() - t
+    if (diff < 60_000) return "Just now"
+    if (diff < 3_600_000) return "${diff / 60_000}min"
+    if (diff < 86_400_000) return "${diff / 3_600_000}hrs"
+    return "${diff / 86_400_000}days"
+}
+
+fun formatStoryCount(n: Int): String {
+    if (n >= 1_000_000) return String.format(java.util.Locale.US, "%.1fM", n / 1_000_000f)
+    if (n >= 1_000) return String.format(java.util.Locale.US, "%.1fK", n / 1_000f)
+    return n.toString()
+}
+
+fun getDefaultStoryAvatar(name: String, seed: String): String {
+    val colors = listOf("1877F2", "45BD62", "F3425F", "F7B928", "9360F7")
+    val hash = seed.toCharArray().fold(0) { acc, c -> acc + c.code }
+    val color = colors[Math.abs(hash) % colors.size]
+    val init = (name.ifBlank { "U" }).take(1).uppercase()
+    return "https://ui-avatars.com/api/?name=${java.net.URLEncoder.encode(init, "UTF-8")}&background=${color}&color=fff&size=128&bold=true&rounded=true"
+}
+
+fun isStoryExpired(story: StoryType): Boolean {
+    val active = story.isActive
+    if (active == 0 || active == 0L || active == false || active == "0" || active == "false") return true
+    val expires = story.expiresAt.trim()
+    if (expires.isEmpty()) return false
+    return parseStoryServerTime(expires) < System.currentTimeMillis()
+}
+
+val sampleStories = listOf(
+    StoryType(
+        id = "story-1",
+        userId = "user-101",
+        slug = "landed-senior-dev-dar",
+        type = "text",
+        textContent = "Just signed my contract with Vodacom as Senior Mobile Engineer in Dar es Salaam! Keep pushing, persistence pays off! 🚀",
+        backgroundStyle = "linear-gradient(135deg, #1877F2, #0055FF)",
+        createdAt = "2026-10-16T12:00:00Z",
+        expiresAt = "2026-10-23T23:59:59Z",
+        viewsCount = 342,
+        user = StoryUser(
+            id = "user-101",
+            name = "Baraka Mwangi",
+            username = "barakadev",
+            profileImageUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80"
+        )
+    ),
+    StoryType(
+        id = "story-2",
+        userId = "user-102",
+        slug = "geita-gold-mining-interview",
+        type = "image",
+        mediaUrl = "https://images.unsplash.com/photo-1578575437130-527eed3abbec?w=1080&auto=format&fit=crop&q=80",
+        mediaThumb = "https://images.unsplash.com/photo-1578575437130-527eed3abbec?w=400&auto=format&fit=crop&q=80",
+        textContent = "Site inspection interview at Geita Gold today! Wish me luck everyone ⚒️",
+        backgroundStyle = null,
+        createdAt = "2026-10-16T10:15:00Z",
+        expiresAt = "2026-10-23T23:59:59Z",
+        viewsCount = 890,
+        user = StoryUser(
+            id = "user-102",
+            name = "Neema Kimaro",
+            username = "neemak",
+            profileImageUrl = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80"
+        )
+    ),
+    StoryType(
+        id = "story-3",
+        userId = "user-103",
+        slug = "remote-work-tips-tz",
+        type = "text",
+        textContent = "Pro tip for remote tech roles: polish your GitHub and write clear commit messages. Companies notice! Check jobsreport.online daily.",
+        backgroundStyle = "linear-gradient(135deg, #45BD62, #31A24C)",
+        createdAt = "2026-10-16T08:30:00Z",
+        expiresAt = "2026-10-23T23:59:59Z",
+        viewsCount = 512,
+        user = StoryUser(
+            id = "user-103",
+            name = "Juma Salim",
+            username = "jumasalim",
+            profileImageUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80"
+        )
+    ),
+    StoryType(
+        id = "story-4",
+        userId = "user-104",
+        slug = "aviation-dispatcher-hired",
+        type = "image",
+        mediaUrl = "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=1080&auto=format&fit=crop&q=80",
+        mediaThumb = "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=400&auto=format&fit=crop&q=80",
+        textContent = "First day on the tarmac at JNIA airport! Dreams come true.",
+        backgroundStyle = null,
+        createdAt = "2026-10-15T16:00:00Z",
+        expiresAt = "2026-10-22T23:59:59Z",
+        viewsCount = 1240,
+        user = StoryUser(
+            id = "user-104",
+            name = "Grace Lyimo",
+            username = "gracelyimo",
+            profileImageUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&auto=format&fit=crop&q=80"
+        )
+    )
+)
+
+// ============================================================
+// USER AUTH MODELS (JobsReport UserAuth.tsx Parity)
+// ============================================================
+data class LoginPayload(
+    @Json(name = "email") val email: String,
+    @Json(name = "password") val password: String,
+    @Json(name = "remember") val remember: Boolean? = true
+)
+
+data class RegisterPayload(
+    @Json(name = "name") val name: String,
+    @Json(name = "email") val email: String,
+    @Json(name = "password") val password: String,
+    @Json(name = "username") val username: String? = null,
+    @Json(name = "headline") val headline: String? = null,
+    @Json(name = "location") val location: String? = null
+)
+
+data class ForgotPasswordPayload(
+    @Json(name = "email") val email: String
+)
+
+data class AuthResult(
+    val success: Boolean,
+    val message: String? = null,
+    val token: String? = null,
+    val user: StoryUser? = null
+)
+

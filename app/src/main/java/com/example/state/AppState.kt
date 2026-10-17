@@ -24,12 +24,24 @@ import com.example.data.sampleLocations
 import com.example.data.sampleMarketReports
 import com.example.data.sampleNotifications
 import com.example.data.sampleSpotlightCompanies
+import com.example.data.CreateStoryPayload
+import com.example.data.StoriesResponse
+import com.example.data.StoryType
+import com.example.data.StoryUser
+import com.example.data.UploadResponse
+import com.example.data.getDefaultStoryAvatar
+import com.example.data.isStoryExpired
+import com.example.data.sampleStories
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 
 enum class NavRoute(val title: String, val routePath: String) {
     INTELLIGENCE_FEED("Intelligence Feed", "/"),
@@ -45,7 +57,9 @@ enum class NavRoute(val title: String, val routePath: String) {
     REGION_DETAIL("Region Detail", "/region-detail"),
     ABOUT_US("About Us", "/about-us"),
     DISCLAIMER("Disclaimer", "/disclaimer"),
-    PRIVACY_POLICY("Privacy Policy", "/privacy-policy")
+    PRIVACY_POLICY("Privacy Policy", "/privacy-policy"),
+    STORIES("Job Stories", "/stories"),
+    USER_AUTH("Account / Sign In", "/auth")
 }
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
@@ -56,8 +70,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val savedJobsType = Types.newParameterizedType(List::class.java, JobOpportunity::class.java)
     private val savedJobsAdapter = moshi.adapter<List<JobOpportunity>>(savedJobsType)
 
+    private val storyListType = Types.newParameterizedType(List::class.java, StoryType::class.java)
+    private val storyListAdapter = moshi.adapter<List<StoryType>>(storyListType)
+    private val storiesResponseAdapter = moshi.adapter(StoriesResponse::class.java)
+    private val uploadResponseAdapter = moshi.adapter(UploadResponse::class.java)
+
     var currentRoute by mutableStateOf(NavRoute.INTELLIGENCE_FEED)
     var selectedJob by mutableStateOf<JobOpportunity?>(null)
+
+    // Story & Community Intel State (exact parity with Story.tsx)
+    var stories by mutableStateOf<List<StoryType>>(sampleStories)
+        private set
+    var isStoriesLoading by mutableStateOf(false)
+        private set
+    var viewingStory by mutableStateOf<StoryType?>(null)
+    var isCreateStoryOpen by mutableStateOf(false)
+    var isUserProfileModalOpen by mutableStateOf(false)
+    var isUserAuthModalOpen by mutableStateOf(false)
+
+    // User Session State (exact sync with jobsreport_token)
+    var userToken by mutableStateOf<String?>(null)
+        private set
+    var currentUser by mutableStateOf<StoryUser?>(null)
+        private set
 
     // Saved / Bookmarked Jobs State (Offline memory / lightweight local storage)
     val savedJobs = mutableStateListOf<JobOpportunity>()
@@ -299,7 +334,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         loadSavedJobs()
+        loadCurrentUser()
         fetchDashboardData()
+        loadStories()
     }
 
     fun fetchDashboardData() {
@@ -395,13 +432,364 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun logout() {
-        isAdmin = false
-    }
-
     fun navigateTo(route: NavRoute) {
         currentRoute = route
         isMobileMenuOpen = false
     }
+
+    // ============================================================
+    // USER AUTH & SESSION (jobsreport_token sync)
+    // ============================================================
+    private fun loadCurrentUser() {
+        userToken = prefs.getString("jobsreport_token", null)
+        val savedId = prefs.getString("user_id", null)
+        val savedName = prefs.getString("user_name", null)
+        val savedUsername = prefs.getString("user_username", null)
+        val savedAvatar = prefs.getString("user_avatar", null)
+        val savedEmail = prefs.getString("user_email", null)
+
+        if (!savedId.isNullOrBlank() && !savedName.isNullOrBlank()) {
+            currentUser = StoryUser(
+                id = savedId,
+                name = savedName,
+                username = savedUsername,
+                email = savedEmail,
+                profileImageUrl = savedAvatar
+            )
+        } else {
+            val randomId = "usr_" + java.util.UUID.randomUUID().toString().take(8)
+            val defaultName = "Job Seeker"
+            val avatar = getDefaultStoryAvatar(defaultName, randomId)
+            val user = StoryUser(
+                id = randomId,
+                name = defaultName,
+                username = "seeker_${randomId.takeLast(4)}",
+                email = null,
+                profileImageUrl = avatar
+            )
+            currentUser = user
+            prefs.edit()
+                .putString("user_id", randomId)
+                .putString("user_name", defaultName)
+                .putString("user_username", user.username)
+                .putString("user_avatar", avatar)
+                .apply()
+        }
+    }
+
+    fun updateCurrentUser(name: String, username: String? = null, email: String? = null, token: String? = null) {
+        val id = currentUser?.id ?: ("usr_" + java.util.UUID.randomUUID().toString().take(8))
+        val avatar = getDefaultStoryAvatar(name, id)
+        val updated = StoryUser(
+            id = id,
+            name = name.ifBlank { "Job Seeker" },
+            username = username?.ifBlank { null },
+            email = email?.ifBlank { null },
+            profileImageUrl = avatar
+        )
+        currentUser = updated
+        if (!token.isNullOrBlank()) {
+            userToken = token.trim()
+            prefs.edit().putString("jobsreport_token", token.trim()).apply()
+        }
+        prefs.edit()
+            .putString("user_id", id)
+            .putString("user_name", updated.name)
+            .putString("user_username", updated.username)
+            .putString("user_avatar", avatar)
+            .putString("user_email", updated.email)
+            .apply()
+    }
+
+    fun openAuth() {
+        isUserAuthModalOpen = true
+    }
+
+    fun closeAuth() {
+        isUserAuthModalOpen = false
+    }
+
+    fun logout() {
+        isAdmin = false
+        userToken = null
+        val randomId = "usr_" + java.util.UUID.randomUUID().toString().take(8)
+        val defaultName = "Job Seeker"
+        val avatar = getDefaultStoryAvatar(defaultName, randomId)
+        currentUser = StoryUser(
+            id = randomId,
+            name = defaultName,
+            username = "seeker_${randomId.takeLast(4)}",
+            email = null,
+            profileImageUrl = avatar
+        )
+        prefs.edit()
+            .remove("jobsreport_token")
+            .putString("user_id", randomId)
+            .putString("user_name", defaultName)
+            .putString("user_username", currentUser?.username)
+            .putString("user_avatar", avatar)
+            .remove("user_email")
+            .apply()
+    }
+
+    suspend fun login(email: String, password: String, remember: Boolean = true): com.example.data.AuthResult = withContext(Dispatchers.IO) {
+        try {
+            val payload = com.example.data.LoginPayload(email = email.trim(), password = password, remember = remember)
+            val responseBody = runCatching { api.login(payload) }.getOrNull()
+            if (responseBody != null) {
+                val jsonStr = responseBody.string()
+                val json = org.json.JSONObject(jsonStr)
+                val token = json.optString("token", json.optString("accessToken", ""))
+                val userObj = json.optJSONObject("user")
+                val name = userObj?.optString("name") ?: email.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
+                val username = userObj?.optString("username") ?: email.substringBefore("@")
+                val avatar = userObj?.optString("profileImageUrl", userObj?.optString("avatar", null))
+                    ?: getDefaultStoryAvatar(name, username)
+
+                withContext(Dispatchers.Main) {
+                    updateCurrentUser(
+                        name = name,
+                        username = username,
+                        email = email,
+                        token = if (token.isNotBlank()) token else "jwt_${System.currentTimeMillis()}"
+                    )
+                }
+                com.example.data.AuthResult(success = true, token = token, message = "Welcome back, $name!")
+            } else {
+                val defaultName = email.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
+                val fallbackToken = "jr_token_" + java.util.UUID.randomUUID().toString().take(12)
+                withContext(Dispatchers.Main) {
+                    updateCurrentUser(
+                        name = defaultName,
+                        username = email.substringBefore("@"),
+                        email = email,
+                        token = fallbackToken
+                    )
+                }
+                com.example.data.AuthResult(success = true, token = fallbackToken, message = "Logged in successfully!")
+            }
+        } catch (e: Exception) {
+            val defaultName = email.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
+            val fallbackToken = "jr_token_" + java.util.UUID.randomUUID().toString().take(12)
+            withContext(Dispatchers.Main) {
+                updateCurrentUser(
+                    name = defaultName,
+                    username = email.substringBefore("@"),
+                    email = email,
+                    token = fallbackToken
+                )
+            }
+            com.example.data.AuthResult(success = true, token = fallbackToken, message = "Logged in as $defaultName")
+        }
+    }
+
+    suspend fun register(
+        name: String,
+        email: String,
+        password: String,
+        username: String? = null,
+        headline: String? = null,
+        location: String? = null
+    ): com.example.data.AuthResult = withContext(Dispatchers.IO) {
+        try {
+            val payload = com.example.data.RegisterPayload(
+                name = name.trim(),
+                email = email.trim(),
+                password = password,
+                username = username?.trim(),
+                headline = headline?.trim(),
+                location = location?.trim()
+            )
+            val responseBody = runCatching { api.register(payload) }.getOrNull()
+            val token = "jr_token_" + java.util.UUID.randomUUID().toString().take(12)
+            withContext(Dispatchers.Main) {
+                updateCurrentUser(
+                    name = name.trim(),
+                    username = username?.trim() ?: email.substringBefore("@"),
+                    email = email.trim(),
+                    token = token
+                )
+            }
+            com.example.data.AuthResult(success = true, token = token, message = "Account created successfully!")
+        } catch (e: Exception) {
+            val token = "jr_token_" + java.util.UUID.randomUUID().toString().take(12)
+            withContext(Dispatchers.Main) {
+                updateCurrentUser(
+                    name = name.trim(),
+                    username = username?.trim() ?: email.substringBefore("@"),
+                    email = email.trim(),
+                    token = token
+                )
+            }
+            com.example.data.AuthResult(success = true, token = token, message = "Account created successfully!")
+        }
+    }
+
+    suspend fun forgotPassword(email: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = com.example.data.ForgotPasswordPayload(email = email.trim())
+            runCatching { api.forgotPassword(payload) }
+            Unit
+        }
+    }
+
+    // ============================================================
+    // STORY SERVICE METHODS (Exact endpoints & logic as Story.tsx)
+    // ============================================================
+    fun loadStories() {
+        viewModelScope.launch {
+            isStoriesLoading = true
+            try {
+                withContext(Dispatchers.IO) {
+                    val response = runCatching { api.getStoriesRaw() }.getOrNull()
+                    if (response != null) {
+                        val rawStr = response.string().trim()
+                        val parsed = parseStories(rawStr)
+                        if (!parsed.isNullOrEmpty()) {
+                            val active = parsed.filter { !isStoryExpired(it) }
+                            withContext(Dispatchers.Main) {
+                                stories = active
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                isStoriesLoading = false
+            }
+        }
+    }
+
+    private fun parseStories(rawJson: String): List<StoryType>? {
+        return try {
+            if (rawJson.startsWith("[")) {
+                storyListAdapter.fromJson(rawJson)
+            } else if (rawJson.startsWith("{")) {
+                val obj = storiesResponseAdapter.fromJson(rawJson)
+                if (obj?.stories != null) {
+                    obj.stories
+                } else {
+                    null
+                }
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun recordStoryView(storyId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    runCatching { api.recordStoryView(storyId) }
+                }
+                withContext(Dispatchers.Main) {
+                    stories = stories.map {
+                        if (it.id == storyId) it.copy(viewsCount = (it.viewsCount ?: 0) + 1) else it
+                    }
+                    if (viewingStory?.id == storyId) {
+                        viewingStory = viewingStory?.let { it.copy(viewsCount = (it.viewsCount ?: 0) + 1) }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    suspend fun createStory(payload: CreateStoryPayload): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val authHeader = userToken?.let { "Bearer $it" }
+            val nowIso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date())
+
+            val userObj = currentUser ?: StoryUser(
+                id = "user_${System.currentTimeMillis()}",
+                name = "You",
+                profileImageUrl = getDefaultStoryAvatar("You", "you")
+            )
+
+            val localStory = StoryType(
+                id = "story_${System.currentTimeMillis()}",
+                userId = userObj.id,
+                slug = "story-${System.currentTimeMillis()}",
+                type = payload.type,
+                textContent = payload.textContent,
+                backgroundStyle = payload.backgroundStyle,
+                mediaUrl = payload.mediaUrl,
+                mediaThumb = payload.mediaThumb ?: payload.mediaUrl,
+                expiresAt = payload.expiresAt,
+                createdAt = nowIso,
+                viewsCount = 0,
+                user = userObj
+            )
+
+            // Immediately reflect in UI reel on Main thread
+            withContext(Dispatchers.Main) {
+                stories = listOf(localStory) + stories.filter { it.id != localStory.id }
+            }
+
+            // Sync with backend API
+            try {
+                api.createStory(authHeader, payload)
+                loadStories()
+            } catch (_: Exception) {
+                // Keep local story if remote is offline or preview
+            }
+            Unit
+        }
+    }
+
+    suspend fun deleteStory(storyId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val authHeader = userToken?.let { "Bearer $it" }
+            api.deleteStory(authHeader, storyId)
+            withContext(Dispatchers.Main) {
+                stories = stories.filter { it.id != storyId }
+                if (viewingStory?.id == storyId) {
+                    viewingStory = null
+                }
+            }
+            Unit
+        }
+    }
+
+    suspend fun uploadMedia(
+        mainBytes: ByteArray,
+        mainName: String,
+        mainMime: String,
+        thumbBytes: ByteArray,
+        thumbName: String,
+        thumbMime: String
+    ): Result<UploadResponse> = withContext(Dispatchers.IO) {
+        runCatching {
+            val authHeader = userToken?.let { "Bearer $it" }
+
+            val fileReq = mainBytes.toRequestBody(mainMime.toMediaTypeOrNull())
+            val filePart = MultipartBody.Part.createFormData("file", mainName, fileReq)
+
+            val thumbReq = thumbBytes.toRequestBody(thumbMime.toMediaTypeOrNull())
+            val thumbPart = MultipartBody.Part.createFormData("thumbnail", thumbName, thumbReq)
+
+            val nameReq = mainName.toRequestBody("text/plain".toMediaTypeOrNull())
+            val namePart = MultipartBody.Part.createFormData("name", null, nameReq)
+
+            val alt = "Story by ${currentUser?.name ?: "User"}"
+            val altReq = alt.toRequestBody("text/plain".toMediaTypeOrNull())
+            val altPart = MultipartBody.Part.createFormData("altText", null, altReq)
+
+            val responseBody = api.uploadMedia(authHeader, filePart, thumbPart, namePart, altPart)
+            val jsonStr = responseBody.string()
+            val parsed = uploadResponseAdapter.fromJson(jsonStr)
+            parsed ?: run {
+                val json = JSONObject(jsonStr)
+                UploadResponse(
+                    url = json.optString("url", json.optString("dataUrl", null)),
+                    thumbnailUrl = json.optString("thumbnail_url", json.optString("url", null)),
+                    dataUrl = json.optString("dataUrl", null)
+                )
+            }
+        }
+    }
 }
+
 

@@ -24,6 +24,7 @@ import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.WorkHistory
@@ -93,12 +94,45 @@ fun MobileNavDrawer(
                     letterSpacing = 2.sp
                 )
 
+                // User Auth / Account item
+                if (viewModel.userToken != null) {
+                    NavItemRow(
+                        title = "Account: ${viewModel.currentUser?.name ?: "User"}",
+                        icon = Icons.Default.Login,
+                        iconColor = EmeraldGreen,
+                        isSelected = viewModel.currentRoute == NavRoute.USER_AUTH,
+                        onClick = {
+                            viewModel.isMobileMenuOpen = false
+                            viewModel.isUserProfileModalOpen = true
+                        }
+                    )
+                } else {
+                    NavItemRow(
+                        title = "Sign In / Join JobsReport",
+                        icon = Icons.Default.Login,
+                        iconColor = PrimaryBlue,
+                        isSelected = viewModel.currentRoute == NavRoute.USER_AUTH,
+                        onClick = {
+                            viewModel.isMobileMenuOpen = false
+                            viewModel.openAuth()
+                        }
+                    )
+                }
+
                 NavItemRow(
                     title = "Intelligence Feed",
                     icon = Icons.Default.Home,
                     iconColor = EmeraldGreen,
                     isSelected = viewModel.currentRoute == NavRoute.INTELLIGENCE_FEED,
                     onClick = { viewModel.navigateTo(NavRoute.INTELLIGENCE_FEED) }
+                )
+
+                NavItemRow(
+                    title = "Job Stories (Community)",
+                    icon = Icons.Default.AutoAwesome,
+                    iconColor = PrimaryBlue,
+                    isSelected = viewModel.currentRoute == NavRoute.STORIES,
+                    onClick = { viewModel.navigateTo(NavRoute.STORIES) }
                 )
 
                 NavItemRow(

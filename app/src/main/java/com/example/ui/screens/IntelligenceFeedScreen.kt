@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
@@ -174,6 +175,166 @@ fun IntelligenceFeedScreen(viewModel: AppViewModel) {
                         )
                     }
                 }
+            }
+        }
+
+        // --- Community Job Stories Reel (Sync with JobsReport Web) ---
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(BgCard)
+                .border(1.dp, BorderWhite10, RoundedCornerShape(20.dp))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(EmeraldGreen)
+                    )
+                    Text(
+                        text = "COMMUNITY STORIES",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Quick "+ Create Story" button on Home Screen
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(Color(0xFF1877F2), Color(0xFF0055FF))
+                                )
+                            )
+                            .clickable {
+                                if (viewModel.userToken != null) {
+                                    viewModel.isCreateStoryOpen = true
+                                } else {
+                                    viewModel.openAuth()
+                                }
+                            }
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Create Story",
+                            tint = Color.White,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = "Create Story",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // View All link
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White.copy(alpha = 0.05f))
+                            .clickable { viewModel.navigateTo(NavRoute.STORIES) }
+                            .padding(horizontal = 9.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "View All",
+                            color = LightBlue,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = LightBlue,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+                }
+            }
+
+            com.example.ui.screens.StoryReel(
+                stories = viewModel.stories,
+                loading = viewModel.isStoriesLoading,
+                currentUser = viewModel.currentUser,
+                onCreateStory = {
+                    if (viewModel.currentUser != null) {
+                        viewModel.isCreateStoryOpen = true
+                    } else {
+                        viewModel.openAuth()
+                    }
+                },
+                onViewStory = { story ->
+                    viewModel.viewingStory = story
+                },
+                onProfileClick = { _ ->
+                    if (viewModel.userToken != null) {
+                        viewModel.isUserProfileModalOpen = true
+                    } else {
+                        viewModel.openAuth()
+                    }
+                },
+                onRequestLogin = {
+                    viewModel.openAuth()
+                }
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(EmeraldGreen)
+                    )
+                    Text(
+                        text = "Stories disappear in 7 days",
+                        color = TextMuted,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Text(
+                    text = "${viewModel.stories.count { !com.example.data.isStoryExpired(it) }} active",
+                    color = LightBlue,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
 

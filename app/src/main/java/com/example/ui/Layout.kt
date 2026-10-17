@@ -32,6 +32,7 @@ import com.example.ui.screens.RegionsScreen
 import com.example.ui.screens.ReportDetailScreen
 import com.example.ui.screens.ReportsScreen
 import com.example.ui.screens.SavedJobsScreen
+import com.example.ui.screens.UserAuthPage
 import com.example.ui.theme.BgDeep
 
 @Composable
@@ -76,8 +77,24 @@ fun JobsReportLayout(viewModel: AppViewModel) {
                         NavRoute.ABOUT_US -> AboutUsScreen(viewModel = viewModel)
                         NavRoute.DISCLAIMER -> DisclaimerScreen(viewModel = viewModel)
                         NavRoute.PRIVACY_POLICY -> PrivacyPolicyScreen(viewModel = viewModel)
+                        NavRoute.STORIES -> com.example.ui.screens.StoryScreen(viewModel = viewModel)
+                        NavRoute.USER_AUTH -> UserAuthPage(
+                            viewModel = viewModel,
+                            onClose = { viewModel.navigateTo(NavRoute.INTELLIGENCE_FEED) }
+                        )
                     }
                 }
+            }
+
+            // Global Story Overlays & Modals (Story Viewer, Create Story, User Profile)
+            com.example.ui.screens.GlobalStoryModals(viewModel = viewModel)
+
+            // Global User Auth Modal / Overlay (Login, Register, Forgot Password)
+            if (viewModel.isUserAuthModalOpen) {
+                UserAuthPage(
+                    viewModel = viewModel,
+                    onClose = { viewModel.closeAuth() }
+                )
             }
 
             // Dialog Modals
