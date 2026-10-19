@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Login
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.Button
@@ -97,13 +98,13 @@ fun MobileNavDrawer(
                 // User Auth / Account item
                 if (viewModel.userToken != null) {
                     NavItemRow(
-                        title = "Account: ${viewModel.currentUser?.name ?: "User"}",
-                        icon = Icons.Default.Login,
+                        title = "My Profile: ${viewModel.currentUser?.name ?: "User"}",
+                        icon = Icons.Default.Person,
                         iconColor = EmeraldGreen,
-                        isSelected = viewModel.currentRoute == NavRoute.USER_AUTH,
+                        isSelected = viewModel.currentRoute == NavRoute.USER_PROFILE,
                         onClick = {
                             viewModel.isMobileMenuOpen = false
-                            viewModel.isUserProfileModalOpen = true
+                            viewModel.openUserProfile(null)
                         }
                     )
                 } else {
@@ -221,8 +222,7 @@ fun MobileNavDrawer(
                         )
                         .clickable {
                             viewModel.isMobileMenuOpen = false
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://jobsreport.online/employ"))
-                            context.startActivity(intent)
+                            viewModel.openPostJob()
                         }
                         .padding(14.dp),
                     contentAlignment = Alignment.Center

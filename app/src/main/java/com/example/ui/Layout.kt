@@ -82,12 +82,34 @@ fun JobsReportLayout(viewModel: AppViewModel) {
                             viewModel = viewModel,
                             onClose = { viewModel.navigateTo(NavRoute.INTELLIGENCE_FEED) }
                         )
+                        NavRoute.USER_PROFILE -> com.example.ui.screens.UserProfilePage(
+                            viewModel = viewModel,
+                            onClose = { viewModel.navigateTo(NavRoute.INTELLIGENCE_FEED) }
+                        )
+                        NavRoute.USER_JOB_INPUT -> com.example.ui.screens.UserJobInputScreen(
+                            viewModel = viewModel,
+                            onClose = {
+                                if (viewModel.editingJob != null) {
+                                    viewModel.openUserProfile(null)
+                                } else {
+                                    viewModel.navigateTo(NavRoute.INTELLIGENCE_FEED)
+                                }
+                            }
+                        )
                     }
                 }
             }
 
-            // Global Story Overlays & Modals (Story Viewer, Create Story, User Profile)
+            // Global Story Overlays & Modals (Story Viewer, Create Story)
             com.example.ui.screens.GlobalStoryModals(viewModel = viewModel)
+
+            // Global User Profile Overlay (when triggered via modal flag)
+            if (viewModel.isUserProfileModalOpen) {
+                com.example.ui.screens.UserProfilePage(
+                    viewModel = viewModel,
+                    onClose = { viewModel.isUserProfileModalOpen = false }
+                )
+            }
 
             // Global User Auth Modal / Overlay (Login, Register, Forgot Password)
             if (viewModel.isUserAuthModalOpen) {

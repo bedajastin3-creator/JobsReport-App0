@@ -277,8 +277,7 @@ fun TechnicalFooter(viewModel: AppViewModel? = null) {
                             context.startActivity(Intent.createChooser(intent, "Contact Support"))
                         }
                         FooterLinkItem(label = "Post Job") {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://jobsreport.online/employ"))
-                            context.startActivity(intent)
+                            viewModel.openPostJob()
                         }
                         FooterLinkItem(label = "v2.4.0 Active") {}
                     }

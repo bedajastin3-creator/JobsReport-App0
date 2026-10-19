@@ -215,7 +215,7 @@ fun StoryScreen(viewModel: AppViewModel) {
                     IconButton(
                         onClick = {
                             if (viewModel.userToken != null) {
-                                viewModel.isUserProfileModalOpen = true
+                                viewModel.openUserProfile(null)
                             } else {
                                 viewModel.openAuth()
                             }
@@ -249,12 +249,9 @@ fun StoryScreen(viewModel: AppViewModel) {
                     }
                 },
                 onViewStory = { story -> viewModel.viewingStory = story },
-                onProfileClick = { _ ->
-                    if (viewModel.userToken != null) {
-                        viewModel.isUserProfileModalOpen = true
-                    } else {
-                        viewModel.openAuth()
-                    }
+                onProfileClick = { authorId ->
+                    val author = activeStories.firstOrNull { it.userId == authorId }?.user
+                    viewModel.openUserProfile(author)
                 },
                 onRequestLogin = { viewModel.openAuth() }
             )
@@ -328,7 +325,15 @@ fun StoryScreen(viewModel: AppViewModel) {
                                 Box(modifier = Modifier.weight(1f)) {
                                     StoryGridCard(
                                         story = story,
-                                        onClick = { viewModel.viewingStory = story }
+                                        onClick = { viewModel.viewingStory = story },
+                                        onProfileClick = {
+                                            val authorUser = story.user ?: StoryUser(
+                                                id = story.userId,
+                                                name = "User",
+                                                profileImageUrl = getDefaultStoryAvatar("User", story.userId)
+                                            )
+                                            viewModel.openUserProfile(authorUser)
+                                        }
                                     )
                                 }
                             }
@@ -394,6 +399,10 @@ fun GlobalStoryModals(viewModel: AppViewModel) {
             },
             onViewRecorded = { storyId ->
                 viewModel.recordStoryView(storyId)
+            },
+            onProfileClick = { authorUser ->
+                viewModel.viewingStory = null
+                viewModel.openUserProfile(authorUser)
             }
         )
     }
@@ -428,18 +437,6 @@ fun GlobalStoryModals(viewModel: AppViewModel) {
     }
 
     // USER PROFILE / TOKEN MODAL
-    if (viewModel.isUserProfileModalOpen) {
-        UserProfileModal(
-            currentUser = viewModel.currentUser,
-            userToken = viewModel.userToken,
-            onDismiss = { viewModel.isUserProfileModalOpen = false },
-            onSave = { name, username, email, token ->
-                viewModel.updateCurrentUser(name, username, email, token)
-                viewModel.isUserProfileModalOpen = false
-                Toast.makeText(context, "Profile updated!", Toast.LENGTH_SHORT).show()
-            }
-        )
-    }
 }
 
 // ============================================================
@@ -739,6 +736,7 @@ fun StoryReelCard(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(horizontal = 8.dp, vertical = 8.dp)
+                .clickable(onClick = onProfileClick)
         )
     }
 }
@@ -749,7 +747,8 @@ fun StoryReelCard(
 @Composable
 fun StoryGridCard(
     story: StoryType,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onProfileClick: (() -> Unit)? = null
 ) {
     val author = story.user ?: StoryUser(
         id = story.userId,
@@ -829,7 +828,8 @@ fun StoryGridCard(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = if (onProfileClick != null) Modifier.clickable { onProfileClick() } else Modifier
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -866,7 +866,8 @@ fun StoryViewer(
     onNext: () -> Unit,
     onPrev: () -> Unit,
     onDeleteStory: (String) -> Unit,
-    onViewRecorded: (String) -> Unit
+    onViewRecorded: (String) -> Unit,
+    onProfileClick: ((StoryUser) -> Unit)? = null
 ) {
     val context = LocalContext.current
     var progress by remember(story.id) { mutableFloatStateOf(0f) }
@@ -1038,10 +1039,11 @@ fun StoryViewer(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Author info
+                    // Author info (Clickable to open UserProfile)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = if (onProfileClick != null) Modifier.clickable { onProfileClick(user) } else Modifier
                     ) {
                         AsyncImage(
                             model = user.profileImageUrl ?: getDefaultStoryAvatar(user.name, user.id),

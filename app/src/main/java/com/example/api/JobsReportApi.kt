@@ -25,7 +25,9 @@ import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.Multipart
+import okhttp3.RequestBody
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -98,6 +100,61 @@ interface JobsReportApi {
 
     @POST("api/auth/forgot-password")
     suspend fun forgotPassword(@Body payload: ForgotPasswordPayload): ResponseBody
+
+    @GET("api/users/{id}")
+    suspend fun getUserProfile(@Path("id") id: String): ResponseBody
+
+    @GET("api/users/{id}/jobs")
+    suspend fun getUserJobs(@Path("id") id: String, @Query("limit") limit: Int = 100): ResponseBody
+
+    @GET("api/users/{id}/stories")
+    suspend fun getUserStories(@Path("id") id: String): ResponseBody
+
+    @POST("api/users/{id}/follow")
+    suspend fun followUser(
+        @Header("Authorization") auth: String?,
+        @Path("id") id: String
+    ): ResponseBody
+
+    @DELETE("api/users/{id}/follow")
+    suspend fun unfollowUser(
+        @Header("Authorization") auth: String?,
+        @Path("id") id: String
+    ): ResponseBody
+
+    @PUT("api/users/me")
+    suspend fun updateProfile(
+        @Header("Authorization") auth: String?,
+        @Body payload: RequestBody
+    ): ResponseBody
+
+    @DELETE("api/user/jobs/{id}")
+    suspend fun deleteJob(
+        @Header("Authorization") auth: String?,
+        @Path("id") id: String
+    ): ResponseBody
+
+    @GET("api/companies")
+    suspend fun getAllCompaniesRaw(@Query("all") all: Boolean = true): ResponseBody
+
+    @POST("api/companies")
+    suspend fun createCompanyRaw(
+        @Header("Authorization") auth: String?,
+        @Body payload: RequestBody
+    ): ResponseBody
+
+    @POST("api/user/jobs")
+    suspend fun createUserJob(
+        @Header("Authorization") auth: String?,
+        @Body payload: RequestBody
+    ): ResponseBody
+
+    @PUT("api/users/{userId}/jobs")
+    suspend fun updateUserJob(
+        @Header("Authorization") auth: String?,
+        @Path("userId") userId: String,
+        @Body payload: RequestBody
+    ): ResponseBody
 
     companion object {
         private const val BASE_URL = "https://jobsreport.online/"

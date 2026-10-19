@@ -197,7 +197,7 @@ fun HeaderNav(
                     )
                     .clickable {
                         if (viewModel.userToken != null) {
-                            viewModel.isUserProfileModalOpen = true
+                            viewModel.openUserProfile(null)
                         } else {
                             viewModel.openAuth()
                         }

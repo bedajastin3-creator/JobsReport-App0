@@ -291,12 +291,9 @@ fun IntelligenceFeedScreen(viewModel: AppViewModel) {
                 onViewStory = { story ->
                     viewModel.viewingStory = story
                 },
-                onProfileClick = { _ ->
-                    if (viewModel.userToken != null) {
-                        viewModel.isUserProfileModalOpen = true
-                    } else {
-                        viewModel.openAuth()
-                    }
+                onProfileClick = { authorId ->
+                    val storyAuthor = viewModel.stories.firstOrNull { it.userId == authorId }?.user
+                    viewModel.openUserProfile(storyAuthor)
                 },
                 onRequestLogin = {
                     viewModel.openAuth()

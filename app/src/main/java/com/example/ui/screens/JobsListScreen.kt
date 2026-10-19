@@ -466,8 +466,7 @@ fun JobsListScreen(viewModel: AppViewModel) {
                         .clip(RoundedCornerShape(12.dp))
                         .background(PrimaryBlue)
                         .clickable {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://jobsreport.online/employ"))
-                            context.startActivity(intent)
+                            viewModel.openPostJob()
                         }
                         .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {

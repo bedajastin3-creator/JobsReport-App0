@@ -43,7 +43,15 @@ data class JobOpportunity(
     @Json(name = "city") val city: String? = "Dar es Salaam",
     @Json(name = "region") val region: String? = "Dar es Salaam",
     @Json(name = "country") val country: String? = "Tanzania",
-    @Json(name = "job_category") val jobCategory: String? = "Technology & Engineering"
+    @Json(name = "job_category") val jobCategory: String? = "Technology & Engineering",
+    @Json(name = "street_address") val streetAddress: String? = null,
+    @Json(name = "postcode") val postcode: String? = null,
+    @Json(name = "industry") val industry: String? = null,
+    @Json(name = "skills") val skills: List<String>? = emptyList(),
+    @Json(name = "benefits") val benefits: List<String>? = emptyList(),
+    @Json(name = "salary_min") val salaryMin: Double? = null,
+    @Json(name = "salary_max") val salaryMax: Double? = null,
+    @Json(name = "salary_currency") val salaryCurrency: String? = "TZS"
 )
 
 fun JobOpportunity.isJobExpired(): Boolean {
@@ -860,7 +868,26 @@ data class StoryUser(
     @Json(name = "name") val name: String,
     @Json(name = "username") val username: String? = null,
     @Json(name = "email") val email: String? = null,
-    @Json(name = "profile_image_url") val profileImageUrl: String? = null
+    @Json(name = "profile_image_url") val profileImageUrl: String? = null,
+    @Json(name = "cover_image_url") val coverImageUrl: String? = null,
+    @Json(name = "headline") val headline: String? = null,
+    @Json(name = "bio") val bio: String? = null,
+    @Json(name = "work") val work: String? = null,
+    @Json(name = "education") val education: String? = null,
+    @Json(name = "location") val location: String? = null,
+    @Json(name = "website") val website: String? = null,
+    @Json(name = "country") val country: String? = null,
+    @Json(name = "role") val role: String? = null,
+    @Json(name = "is_verified") val isVerified: Any? = null,
+    @Json(name = "followers_count") val followersCount: Int? = 0,
+    @Json(name = "following_count") val followingCount: Int? = 0,
+    @Json(name = "jobs_count") val jobsCount: Int? = 0,
+    @Json(name = "stories_count") val storiesCount: Int? = 0,
+    @Json(name = "is_following") val isFollowing: Boolean? = false,
+    @Json(name = "created_at") val createdAt: String? = null,
+    @Json(name = "job_adverts_count") val jobAdvertsCount: Int? = 0,
+    @Json(name = "joined_date") val joinedDate: String? = null,
+    @Json(name = "skills") val skills: List<String>? = null
 )
 
 data class StoryType(
