@@ -89,10 +89,13 @@ fun JobsReportLayout(viewModel: AppViewModel) {
                         NavRoute.USER_JOB_INPUT -> com.example.ui.screens.UserJobInputScreen(
                             viewModel = viewModel,
                             onClose = {
-                                if (viewModel.editingJob != null) {
-                                    viewModel.openUserProfile(null)
+                                val target = viewModel.jobInputReturnRoute ?: (if (viewModel.editingJob != null) NavRoute.USER_PROFILE else NavRoute.INTELLIGENCE_FEED)
+                                viewModel.jobInputReturnRoute = null
+                                viewModel.editingJob = null
+                                if (target == NavRoute.USER_PROFILE) {
+                                    viewModel.openUserProfile(viewModel.viewingProfileUser)
                                 } else {
-                                    viewModel.navigateTo(NavRoute.INTELLIGENCE_FEED)
+                                    viewModel.navigateTo(target)
                                 }
                             }
                         )

@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -98,6 +99,7 @@ import com.example.data.CreateStoryPayload
 import com.example.data.STORY_BACKGROUNDS
 import com.example.data.StoryType
 import com.example.data.StoryUser
+import com.example.data.isUserVerified
 import com.example.data.formatStoryCount
 import com.example.data.formatStoryTime
 import com.example.data.getDefaultStoryAvatar
@@ -105,6 +107,7 @@ import com.example.data.isStoryExpired
 import com.example.data.parseStoryServerTime
 import com.example.state.AppViewModel
 import com.example.state.NavRoute
+import com.example.ui.components.VerifiedBadge
 import com.example.ui.theme.BgCard
 import com.example.ui.theme.BgDeep
 import com.example.ui.theme.BorderWhite10
@@ -241,6 +244,8 @@ fun StoryScreen(viewModel: AppViewModel) {
                 stories = activeStories,
                 loading = viewModel.isStoriesLoading,
                 currentUser = viewModel.currentUser,
+                isUserVerified = { uid, u -> viewModel.isUserVerified(uid, u) },
+                authorProvider = { uid, u -> viewModel.getResolvedUser(uid, u) },
                 onCreateStory = {
                     if (viewModel.userToken != null) {
                         viewModel.isCreateStoryOpen = true
@@ -250,7 +255,7 @@ fun StoryScreen(viewModel: AppViewModel) {
                 },
                 onViewStory = { story -> viewModel.viewingStory = story },
                 onProfileClick = { authorId ->
-                    val author = activeStories.firstOrNull { it.userId == authorId }?.user
+                    val author = viewModel.getResolvedUser(authorId, activeStories.firstOrNull { it.userId == authorId }?.user)
                     viewModel.openUserProfile(author)
                 },
                 onRequestLogin = { viewModel.openAuth() }
@@ -325,13 +330,11 @@ fun StoryScreen(viewModel: AppViewModel) {
                                 Box(modifier = Modifier.weight(1f)) {
                                     StoryGridCard(
                                         story = story,
+                                        author = viewModel.getResolvedUser(story.userId, story.user),
+                                        isVerified = viewModel.isUserVerified(story.userId, story.user),
                                         onClick = { viewModel.viewingStory = story },
                                         onProfileClick = {
-                                            val authorUser = story.user ?: StoryUser(
-                                                id = story.userId,
-                                                name = "User",
-                                                profileImageUrl = getDefaultStoryAvatar("User", story.userId)
-                                            )
+                                            val authorUser = viewModel.getResolvedUser(story.userId, story.user)
                                             viewModel.openUserProfile(authorUser)
                                         }
                                     )
@@ -363,16 +366,13 @@ fun GlobalStoryModals(viewModel: AppViewModel) {
     // STORY VIEWER MODAL
     if (viewModel.viewingStory != null) {
         val currentStory = viewModel.viewingStory!!
-        val author = currentStory.user ?: StoryUser(
-            id = currentStory.userId,
-            name = "User",
-            profileImageUrl = getDefaultStoryAvatar("User", currentStory.userId)
-        )
-
+        val author = viewModel.getResolvedUser(currentStory.userId, currentStory.user)
+        val isVerified = viewModel.isUserVerified(currentStory.userId, author)
         StoryViewer(
             story = currentStory,
             user = author,
             currentUser = viewModel.currentUser,
+            isVerified = isVerified,
             allStories = activeStories,
             onClose = { viewModel.viewingStory = null },
             onNext = {
@@ -447,6 +447,8 @@ fun StoryReel(
     stories: List<StoryType>,
     loading: Boolean = false,
     currentUser: StoryUser?,
+    isUserVerified: ((String, StoryUser?) -> Boolean)? = null,
+    authorProvider: ((String, StoryUser?) -> StoryUser)? = null,
     onCreateStory: () -> Unit,
     onViewStory: (StoryType) -> Unit,
     onProfileClick: (String) -> Unit,
@@ -495,9 +497,14 @@ fun StoryReel(
 
             // User stories cards
             items(uniqueUsers, key = { it.id }) { story ->
+                val resolvedAuthor = authorProvider?.invoke(story.userId, story.user) ?: story.user
+                val isVerified = isUserVerified?.invoke(story.userId, resolvedAuthor)
+                    ?: (resolvedAuthor?.isUserVerified == true)
                 StoryReelCard(
                     story = story,
+                    author = resolvedAuthor,
                     currentUser = currentUser,
+                    isVerified = isVerified,
                     onClick = { onViewStory(story) },
                     onProfileClick = { onProfileClick(story.userId) },
                     onAddMore = {
@@ -600,12 +607,14 @@ fun CreateStoryCard(
 @Composable
 fun StoryReelCard(
     story: StoryType,
+    author: StoryUser? = null,
     currentUser: StoryUser?,
+    isVerified: Boolean = false,
     onClick: () -> Unit,
     onProfileClick: () -> Unit,
     onAddMore: () -> Unit
 ) {
-    val author = story.user ?: StoryUser(
+    val resolvedAuthor = author ?: story.user ?: StoryUser(
         id = story.userId,
         name = "User",
         profileImageUrl = getDefaultStoryAvatar("User", story.userId)
@@ -681,22 +690,36 @@ fun StoryReelCard(
                 )
         )
 
-        // Top Left: Author Avatar with Blue Border
+        // Top Left: Author Avatar with Blue Border & Verified Badge
         Box(
             modifier = Modifier
                 .padding(8.dp)
                 .align(Alignment.TopStart)
                 .size(34.dp)
-                .clip(CircleShape)
-                .border(2.5.dp, StoryPrimaryBlue, CircleShape)
-                .clickable(onClick = onProfileClick)
         ) {
-            AsyncImage(
-                model = author.profileImageUrl ?: getDefaultStoryAvatar(author.name, author.id),
-                contentDescription = author.name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .border(2.5.dp, StoryPrimaryBlue, CircleShape)
+                    .clickable(onClick = onProfileClick)
+            ) {
+                AsyncImage(
+                    model = resolvedAuthor.profileImageUrl ?: getDefaultStoryAvatar(resolvedAuthor.name, resolvedAuthor.id),
+                    contentDescription = resolvedAuthor.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            if (isVerified) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .offset(x = 2.dp, y = 2.dp)
+                ) {
+                    VerifiedBadge(size = 13.dp)
+                }
+            }
         }
 
         // Top Right: Plus button if it's my story
@@ -725,19 +748,28 @@ fun StoryReelCard(
             }
         }
 
-        // Bottom: Author Name
-        Text(
-            text = if (isMine) "Your Story" else author.name,
-            color = Color.White,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        // Bottom: Author Name with Verified Tick
+        Row(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(horizontal = 8.dp, vertical = 8.dp)
-                .clickable(onClick = onProfileClick)
-        )
+                .clickable(onClick = onProfileClick),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (isMine) "Your Story" else resolvedAuthor.name,
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            if (isVerified) {
+                Spacer(modifier = Modifier.width(3.dp))
+                VerifiedBadge(size = 11.dp)
+            }
+        }
     }
 }
 
@@ -747,10 +779,12 @@ fun StoryReelCard(
 @Composable
 fun StoryGridCard(
     story: StoryType,
+    author: StoryUser? = null,
+    isVerified: Boolean = false,
     onClick: () -> Unit,
     onProfileClick: (() -> Unit)? = null
 ) {
-    val author = story.user ?: StoryUser(
+    val resolvedAuthor = author ?: story.user ?: StoryUser(
         id = story.userId,
         name = "User",
         profileImageUrl = getDefaultStoryAvatar("User", story.userId)
@@ -822,15 +856,24 @@ fun StoryGridCard(
                 .padding(horizontal = 10.dp, vertical = 8.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = author.name,
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = if (onProfileClick != null) Modifier.clickable { onProfileClick() } else Modifier
-                )
+                ) {
+                    Text(
+                        text = resolvedAuthor.name,
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (isVerified) {
+                        Spacer(modifier = Modifier.width(3.dp))
+                        VerifiedBadge(size = 11.dp)
+                    }
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -861,6 +904,7 @@ fun StoryViewer(
     story: StoryType,
     user: StoryUser,
     currentUser: StoryUser?,
+    isVerified: Boolean = user.isUserVerified,
     allStories: List<StoryType>,
     onClose: () -> Unit,
     onNext: () -> Unit,
@@ -1055,12 +1099,20 @@ fun StoryViewer(
                                 .border(2.dp, StoryPrimaryBlue, CircleShape)
                         )
                         Column {
-                            Text(
-                                text = user.name,
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = user.name,
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (isVerified) {
+                                    VerifiedBadge(size = 16.dp)
+                                }
+                            }
                             Text(
                                 text = formatStoryTime(story.createdAt),
                                 color = Color.White.copy(alpha = 0.7f),

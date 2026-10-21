@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -31,7 +32,7 @@ import com.example.data.StoryUser
 import com.example.data.UploadResponse
 import com.example.data.getDefaultStoryAvatar
 import com.example.data.isStoryExpired
-import com.example.data.sampleStories
+import com.example.data.isUserVerified
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -42,6 +43,7 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import org.json.JSONArray
 
 enum class NavRoute(val title: String, val routePath: String) {
     INTELLIGENCE_FEED("Intelligence Feed", "/"),
@@ -81,7 +83,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var selectedJob by mutableStateOf<JobOpportunity?>(null)
 
     // Story & Community Intel State (exact parity with Story.tsx)
-    var stories by mutableStateOf<List<StoryType>>(sampleStories)
+    var stories by mutableStateOf<List<StoryType>>(emptyList())
         private set
     var isStoriesLoading by mutableStateOf(false)
         private set
@@ -97,6 +99,67 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var viewingProfileUser by mutableStateOf<StoryUser?>(null)
     val followedUserIds = mutableStateListOf<String>()
+
+    // Real server-verified user status & profile cache
+    val verifiedUsersMap = mutableStateMapOf<String, Boolean>()
+    val userProfilesCache = mutableStateMapOf<String, StoryUser>()
+
+    private val pendingProfileFetches = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    fun isUserVerified(userId: String, fallbackUser: StoryUser? = null): Boolean {
+        if (userId.isBlank()) return false
+        verifiedUsersMap[userId]?.let { return it }
+        val cached = userProfilesCache[userId]
+        if (cached != null) {
+            val v = cached.isUserVerified
+            verifiedUsersMap[userId] = v
+            return v
+        }
+        if (fallbackUser != null && fallbackUser.isVerified != null) {
+            val v = fallbackUser.isUserVerified
+            verifiedUsersMap[userId] = v
+            return v
+        }
+        // Fetch live from server just as UserProfile does
+        ensureUserProfileLoaded(userId)
+        return false
+    }
+
+    fun getResolvedUser(userId: String, fallbackUser: StoryUser? = null): StoryUser {
+        if (userId.isBlank()) {
+            return fallbackUser ?: StoryUser(
+                id = "",
+                name = "User",
+                profileImageUrl = getDefaultStoryAvatar("User", "anon")
+            )
+        }
+        val cached = userProfilesCache[userId]
+        if (cached != null) return cached
+        ensureUserProfileLoaded(userId)
+        return fallbackUser ?: StoryUser(
+            id = userId,
+            name = "User",
+            profileImageUrl = getDefaultStoryAvatar("User", userId)
+        )
+    }
+
+    fun ensureUserProfileLoaded(userId: String) {
+        if (userId.isBlank() || userProfilesCache.containsKey(userId) || pendingProfileFetches.contains(userId)) return
+        pendingProfileFetches.add(userId)
+        viewModelScope.launch {
+            try {
+                val user = fetchUserProfile(userId)
+                if (user != null) {
+                    withContext(Dispatchers.Main) {
+                        userProfilesCache[userId] = user
+                        verifiedUsersMap[userId] = user.isUserVerified
+                    }
+                }
+            } finally {
+                pendingProfileFetches.remove(userId)
+            }
+        }
+    }
 
     fun isUserFollowed(userId: String): Boolean = followedUserIds.contains(userId)
 
@@ -129,23 +192,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     var editingJob by mutableStateOf<JobOpportunity?>(null)
+    var jobInputReturnRoute by mutableStateOf<NavRoute?>(null)
 
-    fun openPostJob() {
+    fun openPostJob(returnRoute: NavRoute? = currentRoute) {
         if (userToken == null) {
             openAuth()
             return
         }
         editingJob = null
+        jobInputReturnRoute = returnRoute
         isMobileMenuOpen = false
         currentRoute = NavRoute.USER_JOB_INPUT
     }
 
-    fun openEditJob(job: JobOpportunity) {
+    fun openEditJob(job: JobOpportunity, returnRoute: NavRoute? = currentRoute) {
         if (userToken == null) {
             openAuth()
             return
         }
         editingJob = job
+        jobInputReturnRoute = returnRoute
         isMobileMenuOpen = false
         currentRoute = NavRoute.USER_JOB_INPUT
     }
@@ -503,15 +569,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val savedUsername = prefs.getString("user_username", null)
         val savedAvatar = prefs.getString("user_avatar", null)
         val savedEmail = prefs.getString("user_email", null)
-        val savedHeadline = prefs.getString("user_headline", "Job Seeker & Professional")
-        val savedLocation = prefs.getString("user_location", "Dar es Salaam, Tanzania")
-        val savedBio = prefs.getString("user_bio", "Passionate about career development, discovering verified employment signals, and sharing stories on JobsReport.")
-        val savedWebsite = prefs.getString("user_website", "https://jobsreport.online")
+        val savedHeadline = prefs.getString("user_headline", null)
+        val savedLocation = prefs.getString("user_location", null)
+        val savedBio = prefs.getString("user_bio", null)
+        val savedWebsite = prefs.getString("user_website", null)
         val savedWork = prefs.getString("user_work", null)
         val savedEducation = prefs.getString("user_education", null)
         val savedCover = prefs.getString("user_cover", null)
+        val isVerifiedInt = prefs.getInt("user_is_verified", 0)
 
-        if (!savedId.isNullOrBlank() && !savedName.isNullOrBlank()) {
+        if (!userToken.isNullOrBlank() && !savedId.isNullOrBlank() && !savedName.isNullOrBlank()) {
             currentUser = StoryUser(
                 id = savedId,
                 name = savedName,
@@ -525,50 +592,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 work = savedWork,
                 education = savedEducation,
                 website = savedWebsite,
-                followersCount = prefs.getInt("user_followers", 248),
-                followingCount = prefs.getInt("user_following", 82),
-                jobsCount = prefs.getInt("user_jobs_count", 2),
-                storiesCount = prefs.getInt("user_stories_count", 4),
-                jobAdvertsCount = prefs.getInt("user_job_adverts", 4),
-                joinedDate = "Member since Oct 2026",
-                skills = listOf("Product Strategy", "Technical Analysis", "Career Growth", "Community Intel")
+                isVerified = isVerifiedInt,
+                followersCount = prefs.getInt("user_followers", 0),
+                followingCount = prefs.getInt("user_following", 0),
+                jobsCount = prefs.getInt("user_jobs_count", 0),
+                storiesCount = prefs.getInt("user_stories_count", 0),
+                jobAdvertsCount = prefs.getInt("user_job_adverts", 0),
+                joinedDate = prefs.getString("user_joined_date", null),
+                skills = emptyList()
             )
+            // Proactively refresh own user profile from live API
+            viewModelScope.launch {
+                val liveUser = fetchUserProfile(savedId)
+                if (liveUser != null) {
+                    withContext(Dispatchers.Main) {
+                        currentUser = liveUser
+                    }
+                }
+            }
         } else {
-            val randomId = "usr_" + java.util.UUID.randomUUID().toString().take(8)
-            val defaultName = "Job Seeker"
-            val avatar = getDefaultStoryAvatar(defaultName, randomId)
-            val user = StoryUser(
-                id = randomId,
-                name = defaultName,
-                username = "seeker_${randomId.takeLast(4)}",
-                email = null,
-                profileImageUrl = avatar,
-                coverImageUrl = null,
-                headline = "Job Seeker & Professional",
-                location = "Dar es Salaam, Tanzania",
-                bio = "Passionate about career development, discovering verified employment signals, and sharing stories on JobsReport.",
-                work = null,
-                education = null,
-                website = "https://jobsreport.online",
-                followersCount = 248,
-                followingCount = 82,
-                jobsCount = 2,
-                storiesCount = 4,
-                jobAdvertsCount = 4,
-                joinedDate = "Member since Oct 2026",
-                skills = listOf("Product Strategy", "Technical Analysis", "Career Growth", "Community Intel")
-            )
-            currentUser = user
-            prefs.edit()
-                .putString("user_id", randomId)
-                .putString("user_name", defaultName)
-                .putString("user_username", user.username)
-                .putString("user_avatar", avatar)
-                .putString("user_headline", user.headline)
-                .putString("user_location", user.location)
-                .putString("user_bio", user.bio)
-                .putString("user_website", user.website)
-                .apply()
+            currentUser = null
         }
     }
 
@@ -584,24 +627,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         avatarUrl: String? = null,
         coverUrl: String? = null,
         work: String? = null,
-        education: String? = null
+        education: String? = null,
+        isVerified: Any? = null,
+        followersCount: Int? = null,
+        followingCount: Int? = null,
+        jobsCount: Int? = null,
+        storiesCount: Int? = null,
+        jobAdvertsCount: Int? = null,
+        joinedDate: String? = null
     ) {
-        val id = currentUser?.id ?: ("usr_" + java.util.UUID.randomUUID().toString().take(8))
         val current = currentUser
+        val id = current?.id ?: ("usr_" + java.util.UUID.randomUUID().toString().take(8))
         val resolvedAvatar = avatarUrl?.ifBlank { null }
             ?: current?.profileImageUrl
             ?: getDefaultStoryAvatar(name, id)
         val resolvedCover = coverUrl?.ifBlank { null } ?: current?.coverImageUrl
-        val resolvedHeadline = headline?.ifBlank { null } ?: current?.headline ?: "Job Seeker & Professional"
-        val resolvedLocation = location?.ifBlank { null } ?: current?.location ?: "Dar es Salaam, Tanzania"
-        val resolvedBio = bio?.ifBlank { null } ?: current?.bio ?: "Passionate about career development and community intel on JobsReport."
-        val resolvedWebsite = website?.ifBlank { null } ?: current?.website ?: "https://jobsreport.online"
+        val resolvedHeadline = headline?.ifBlank { null } ?: current?.headline
+        val resolvedLocation = location?.ifBlank { null } ?: current?.location
+        val resolvedBio = bio?.ifBlank { null } ?: current?.bio
+        val resolvedWebsite = website?.ifBlank { null } ?: current?.website
         val resolvedWork = work?.ifBlank { null } ?: current?.work
         val resolvedEducation = education?.ifBlank { null } ?: current?.education
+        val resolvedVerified = isVerified ?: current?.isVerified
 
         val updated = StoryUser(
             id = id,
-            name = name.ifBlank { "Job Seeker" },
+            name = name.ifBlank { "User" },
             username = username?.ifBlank { null } ?: current?.username,
             email = email?.ifBlank { null } ?: current?.email,
             profileImageUrl = resolvedAvatar,
@@ -612,19 +663,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             work = resolvedWork,
             education = resolvedEducation,
             website = resolvedWebsite,
-            followersCount = current?.followersCount ?: 248,
-            followingCount = current?.followingCount ?: 82,
-            jobsCount = current?.jobsCount ?: 2,
-            storiesCount = current?.storiesCount ?: 4,
-            jobAdvertsCount = current?.jobAdvertsCount ?: 4,
-            joinedDate = current?.joinedDate ?: "Member since Oct 2026",
-            skills = current?.skills ?: listOf("Product Strategy", "Technical Analysis", "Career Growth", "Community Intel")
+            isVerified = resolvedVerified,
+            followersCount = followersCount ?: current?.followersCount ?: 0,
+            followingCount = followingCount ?: current?.followingCount ?: 0,
+            jobsCount = jobsCount ?: current?.jobsCount ?: 0,
+            storiesCount = storiesCount ?: current?.storiesCount ?: 0,
+            jobAdvertsCount = jobAdvertsCount ?: current?.jobAdvertsCount ?: 0,
+            joinedDate = joinedDate ?: current?.joinedDate,
+            skills = current?.skills ?: emptyList()
         )
         currentUser = updated
         if (!token.isNullOrBlank()) {
             userToken = token.trim()
             prefs.edit().putString("jobsreport_token", token.trim()).apply()
         }
+        val isVerifiedInt = if (updated.isUserVerified) 1 else 0
         prefs.edit()
             .putString("user_id", id)
             .putString("user_name", updated.name)
@@ -638,6 +691,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             .putString("user_work", resolvedWork)
             .putString("user_education", resolvedEducation)
             .putString("user_website", resolvedWebsite)
+            .putInt("user_is_verified", isVerifiedInt)
+            .putInt("user_followers", updated.followersCount ?: 0)
+            .putInt("user_following", updated.followingCount ?: 0)
+            .putInt("user_jobs_count", updated.jobsCount ?: 0)
+            .putInt("user_stories_count", updated.storiesCount ?: 0)
+            .putInt("user_job_adverts", updated.jobAdvertsCount ?: 0)
             .apply()
     }
 
@@ -645,11 +704,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         try {
             val res = runCatching { api.getUserProfile(userId) }.getOrNull()
             if (res != null) {
-                val jsonStr = res.string()
+                val jsonStr = res.string().trim()
                 val json = JSONObject(jsonStr)
                 val userObj = json.optJSONObject("user")
+                    ?: if (json.has("id") || json.has("name") || json.has("is_verified") || json.has("username")) json else null
                 if (userObj != null) {
-                    return@withContext StoryUser(
+                    val fetchedUser = StoryUser(
                         id = userObj.optString("id", userId),
                         name = userObj.optString("name", "User"),
                         username = userObj.optString("username", null),
@@ -664,7 +724,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         website = userObj.optString("website", null),
                         country = userObj.optString("country", null),
                         role = userObj.optString("role", null),
-                        isVerified = userObj.opt("is_verified"),
+                        isVerified = userObj.opt("is_verified") ?: userObj.opt("isVerified"),
                         followersCount = userObj.optInt("followers_count", 0),
                         followingCount = userObj.optInt("following_count", 0),
                         jobsCount = userObj.optInt("jobs_count", 0),
@@ -672,6 +732,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         isFollowing = userObj.optBoolean("is_following", false),
                         createdAt = userObj.optString("created_at", null)
                     )
+                    withContext(Dispatchers.Main) {
+                        userProfilesCache[userId] = fetchedUser
+                        verifiedUsersMap[userId] = fetchedUser.isUserVerified
+                    }
+                    return@withContext fetchedUser
                 }
             }
             null
@@ -681,37 +746,58 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun fetchUserJobs(userId: String): List<JobOpportunity> = withContext(Dispatchers.IO) {
+        if (userId.isBlank()) return@withContext emptyList()
         try {
-            val res = runCatching { api.getUserJobs(userId) }.getOrNull()
+            val res = runCatching { api.getUserJobs(userId, limit = 100) }.getOrNull()
             if (res != null) {
-                val jsonStr = res.string()
-                val json = JSONObject(jsonStr)
-                val arr = json.optJSONArray("jobs")
+                val rawStr = res.string().trim()
+                val list = mutableListOf<JobOpportunity>()
+                val arr = if (rawStr.startsWith("[")) {
+                    JSONArray(rawStr)
+                } else if (rawStr.startsWith("{")) {
+                    val json = JSONObject(rawStr)
+                    json.optJSONArray("jobs")
+                        ?: json.optJSONArray("data")
+                        ?: json.optJSONArray("userJobs")
+                } else null
+
                 if (arr != null) {
-                    val list = mutableListOf<JobOpportunity>()
                     for (i in 0 until arr.length()) {
                         val obj = arr.getJSONObject(i)
                         list.add(
                             JobOpportunity(
                                 id = obj.optString("id", java.util.UUID.randomUUID().toString()),
                                 title = obj.optString("title", "Job Title"),
-                                company = obj.optString("company", "Company"),
+                                company = obj.optString("company", obj.optString("company_name", "Company")),
                                 location = obj.optString("location", "Remote"),
                                 salary = obj.optString("salary", null),
-                                role = obj.optString("role", null),
+                                role = obj.optString("role", obj.optString("job_category", "Technology & Engineering")),
                                 logoUrl = obj.optString("logoUrl", obj.optString("company_logo", null)),
-                                employmentType = obj.optString("employment_type", "FULL_TIME"),
+                                active = if (obj.has("active")) obj.optBoolean("active", true) else (obj.optInt("is_active", 1) == 1),
                                 postedAt = obj.optString("postedAt", obj.optString("posted_at", "Recent")),
-                                url = obj.optString("url", null)
+                                expiresAt = obj.optString("expiresAt", obj.optString("expires_at", null)),
+                                description = obj.optString("description", null),
+                                companyWebsite = obj.optString("companyWebsite", obj.optString("company_website", null)),
+                                whatsappNumber = obj.optString("whatsapp_number", obj.optString("whatsappNumber", null)),
+                                applicationInstructions = obj.optString("application_instructions", obj.optString("applicationInstructions", null)),
+                                url = obj.optString("url", null),
+                                employmentType = obj.optString("employment_type", obj.optString("employmentType", "FULL_TIME")),
+                                workplaceType = obj.optString("workplace_type", obj.optString("workplaceType", "Onsite")),
+                                educationLevel = obj.optString("education_level", obj.optString("educationLevel", "Degree / Diploma")),
+                                experienceMonths = obj.optInt("experience_months", obj.optInt("experienceMonths", 24)),
+                                city = obj.optString("city", "Dar es Salaam"),
+                                region = obj.optString("region", "Dar es Salaam"),
+                                country = obj.optString("country", "Tanzania"),
+                                jobCategory = obj.optString("job_category", obj.optString("jobCategory", "Technology & Engineering"))
                             )
                         )
                     }
-                    if (list.isNotEmpty()) return@withContext list
                 }
+                return@withContext list
             }
-            activeJobs.take(6)
+            emptyList()
         } catch (_: Exception) {
-            activeJobs.take(6)
+            emptyList()
         }
     }
 
@@ -849,46 +935,41 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val jsonStr = responseBody.string()
                 val json = org.json.JSONObject(jsonStr)
                 val token = json.optString("token", json.optString("accessToken", ""))
-                val userObj = json.optJSONObject("user")
-                val name = userObj?.optString("name") ?: email.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
-                val username = userObj?.optString("username") ?: email.substringBefore("@")
-                val avatar = userObj?.optString("profileImageUrl", userObj?.optString("avatar", null))
-                    ?: getDefaultStoryAvatar(name, username)
+                if (token.isNotBlank()) {
+                    val userObj = json.optJSONObject("user")
+                    val name = userObj?.optString("name") ?: email.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
+                    val username = userObj?.optString("username") ?: email.substringBefore("@")
+                    val avatar = userObj?.optString("profileImageUrl", userObj?.optString("avatar", null))
+                        ?: getDefaultStoryAvatar(name, username)
+                    val userId = userObj?.optString("id", "").orEmpty()
+                    val isVerifiedVal = userObj?.opt("is_verified") ?: userObj?.opt("isVerified")
 
-                withContext(Dispatchers.Main) {
-                    updateCurrentUser(
-                        name = name,
-                        username = username,
-                        email = email,
-                        token = if (token.isNotBlank()) token else "jwt_${System.currentTimeMillis()}"
-                    )
+                    withContext(Dispatchers.Main) {
+                        updateCurrentUser(
+                            name = name,
+                            username = username,
+                            email = email,
+                            token = token,
+                            avatarUrl = avatar,
+                            isVerified = isVerifiedVal
+                        )
+                        if (userId.isNotBlank()) {
+                            viewModelScope.launch {
+                                fetchUserProfile(userId)
+                            }
+                        }
+                    }
+                    return@withContext com.example.data.AuthResult(success = true, token = token, message = "Welcome back, $name!")
+                } else {
+                    val errMsg = json.optString("message", json.optString("error", "Invalid credentials. Please check your email and password."))
+                    return@withContext com.example.data.AuthResult(success = false, message = errMsg)
                 }
-                com.example.data.AuthResult(success = true, token = token, message = "Welcome back, $name!")
             } else {
-                val defaultName = email.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
-                val fallbackToken = "jr_token_" + java.util.UUID.randomUUID().toString().take(12)
-                withContext(Dispatchers.Main) {
-                    updateCurrentUser(
-                        name = defaultName,
-                        username = email.substringBefore("@"),
-                        email = email,
-                        token = fallbackToken
-                    )
-                }
-                com.example.data.AuthResult(success = true, token = fallbackToken, message = "Logged in successfully!")
+                return@withContext com.example.data.AuthResult(success = false, message = "Invalid email or password. Please try again.")
             }
         } catch (e: Exception) {
-            val defaultName = email.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
-            val fallbackToken = "jr_token_" + java.util.UUID.randomUUID().toString().take(12)
-            withContext(Dispatchers.Main) {
-                updateCurrentUser(
-                    name = defaultName,
-                    username = email.substringBefore("@"),
-                    email = email,
-                    token = fallbackToken
-                )
-            }
-            com.example.data.AuthResult(success = true, token = fallbackToken, message = "Logged in as $defaultName")
+            val msg = e.message ?: "Authentication failed. Please check your network connection and credentials."
+            return@withContext com.example.data.AuthResult(success = false, message = msg)
         }
     }
 
@@ -910,27 +991,47 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 location = location?.trim()
             )
             val responseBody = runCatching { api.register(payload) }.getOrNull()
-            val token = "jr_token_" + java.util.UUID.randomUUID().toString().take(12)
-            withContext(Dispatchers.Main) {
-                updateCurrentUser(
-                    name = name.trim(),
-                    username = username?.trim() ?: email.substringBefore("@"),
-                    email = email.trim(),
-                    token = token
-                )
+            if (responseBody != null) {
+                val jsonStr = responseBody.string()
+                val json = org.json.JSONObject(jsonStr)
+                val token = json.optString("token", json.optString("accessToken", ""))
+                val userObj = json.optJSONObject("user")
+                val resolvedName = userObj?.optString("name", name.trim()) ?: name.trim()
+                val resolvedUsername = userObj?.optString("username", username?.trim() ?: email.substringBefore("@"))
+                    ?: (username?.trim() ?: email.substringBefore("@"))
+                val avatar = userObj?.optString("profileImageUrl", userObj?.optString("avatar", null))
+                    ?: getDefaultStoryAvatar(resolvedName, resolvedUsername)
+                val userId = userObj?.optString("id", "").orEmpty()
+                val isVerifiedVal = userObj?.opt("is_verified") ?: userObj?.opt("isVerified")
+
+                if (token.isNotBlank()) {
+                    withContext(Dispatchers.Main) {
+                        updateCurrentUser(
+                            name = resolvedName,
+                            username = resolvedUsername,
+                            email = email.trim(),
+                            token = token,
+                            avatarUrl = avatar,
+                            headline = headline?.trim(),
+                            location = location?.trim(),
+                            isVerified = isVerifiedVal
+                        )
+                        if (userId.isNotBlank()) {
+                            viewModelScope.launch {
+                                fetchUserProfile(userId)
+                            }
+                        }
+                    }
+                    return@withContext com.example.data.AuthResult(success = true, token = token, message = "Account created successfully!")
+                } else {
+                    val errMsg = json.optString("message", json.optString("error", "Registration could not be completed."))
+                    return@withContext com.example.data.AuthResult(success = json.optBoolean("success", false), message = errMsg)
+                }
+            } else {
+                return@withContext com.example.data.AuthResult(success = false, message = "Registration failed. Please try a different email or try again later.")
             }
-            com.example.data.AuthResult(success = true, token = token, message = "Account created successfully!")
         } catch (e: Exception) {
-            val token = "jr_token_" + java.util.UUID.randomUUID().toString().take(12)
-            withContext(Dispatchers.Main) {
-                updateCurrentUser(
-                    name = name.trim(),
-                    username = username?.trim() ?: email.substringBefore("@"),
-                    email = email.trim(),
-                    token = token
-                )
-            }
-            com.example.data.AuthResult(success = true, token = token, message = "Account created successfully!")
+            return@withContext com.example.data.AuthResult(success = false, message = e.message ?: "Registration error.")
         }
     }
 
@@ -958,11 +1059,44 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             val active = parsed.filter { !isStoryExpired(it) }
                             withContext(Dispatchers.Main) {
                                 stories = active
+                                active.forEach { s ->
+                                    if (s.user != null) {
+                                        userProfilesCache[s.userId] = s.user
+                                        if (s.user.isVerified != null) {
+                                            verifiedUsersMap[s.userId] = s.user.isUserVerified
+                                        }
+                                    }
+                                }
                             }
+
+                            // Fetch real user profiles for all story authors from the backend
+                            val uniqueAuthorIds = active.map { it.userId }.distinct()
+                            uniqueAuthorIds.forEach { uid ->
+                                if (!verifiedUsersMap.containsKey(uid) || !userProfilesCache.containsKey(uid)) {
+                                    val fetchedUser = fetchUserProfile(uid)
+                                    if (fetchedUser != null) {
+                                        withContext(Dispatchers.Main) {
+                                            userProfilesCache[uid] = fetchedUser
+                                            verifiedUsersMap[uid] = fetchedUser.isUserVerified
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                stories = emptyList()
+                            }
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            stories = emptyList()
                         }
                     }
                 }
             } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    stories = emptyList()
+                }
             } finally {
                 isStoriesLoading = false
             }
@@ -1185,7 +1319,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 api.createUserJob(authHeader, reqBody)
             }
-            loadHomeData()
+            withContext(Dispatchers.Main) {
+                fetchDashboardData()
+            }
             Pair(true, null)
         } catch (e: Exception) {
             Pair(false, e.message ?: "Failed to submit job")

@@ -890,6 +890,14 @@ data class StoryUser(
     @Json(name = "skills") val skills: List<String>? = null
 )
 
+val StoryUser.isUserVerified: Boolean
+    get() = when (val v = this.isVerified) {
+        true, 1, 1L, "1", "true", "TRUE" -> true
+        is Number -> v.toInt() == 1
+        is CharSequence -> v.toString().trim().let { it == "1" || it.equals("true", ignoreCase = true) }
+        else -> false
+    }
+
 data class StoryType(
     @Json(name = "id") val id: String,
     @Json(name = "user_id") val userId: String,
@@ -990,80 +998,7 @@ fun isStoryExpired(story: StoryType): Boolean {
     return parseStoryServerTime(expires) < System.currentTimeMillis()
 }
 
-val sampleStories = listOf(
-    StoryType(
-        id = "story-1",
-        userId = "user-101",
-        slug = "landed-senior-dev-dar",
-        type = "text",
-        textContent = "Just signed my contract with Vodacom as Senior Mobile Engineer in Dar es Salaam! Keep pushing, persistence pays off! 🚀",
-        backgroundStyle = "linear-gradient(135deg, #1877F2, #0055FF)",
-        createdAt = "2026-10-16T12:00:00Z",
-        expiresAt = "2026-10-23T23:59:59Z",
-        viewsCount = 342,
-        user = StoryUser(
-            id = "user-101",
-            name = "Baraka Mwangi",
-            username = "barakadev",
-            profileImageUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80"
-        )
-    ),
-    StoryType(
-        id = "story-2",
-        userId = "user-102",
-        slug = "geita-gold-mining-interview",
-        type = "image",
-        mediaUrl = "https://images.unsplash.com/photo-1578575437130-527eed3abbec?w=1080&auto=format&fit=crop&q=80",
-        mediaThumb = "https://images.unsplash.com/photo-1578575437130-527eed3abbec?w=400&auto=format&fit=crop&q=80",
-        textContent = "Site inspection interview at Geita Gold today! Wish me luck everyone ⚒️",
-        backgroundStyle = null,
-        createdAt = "2026-10-16T10:15:00Z",
-        expiresAt = "2026-10-23T23:59:59Z",
-        viewsCount = 890,
-        user = StoryUser(
-            id = "user-102",
-            name = "Neema Kimaro",
-            username = "neemak",
-            profileImageUrl = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80"
-        )
-    ),
-    StoryType(
-        id = "story-3",
-        userId = "user-103",
-        slug = "remote-work-tips-tz",
-        type = "text",
-        textContent = "Pro tip for remote tech roles: polish your GitHub and write clear commit messages. Companies notice! Check jobsreport.online daily.",
-        backgroundStyle = "linear-gradient(135deg, #45BD62, #31A24C)",
-        createdAt = "2026-10-16T08:30:00Z",
-        expiresAt = "2026-10-23T23:59:59Z",
-        viewsCount = 512,
-        user = StoryUser(
-            id = "user-103",
-            name = "Juma Salim",
-            username = "jumasalim",
-            profileImageUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80"
-        )
-    ),
-    StoryType(
-        id = "story-4",
-        userId = "user-104",
-        slug = "aviation-dispatcher-hired",
-        type = "image",
-        mediaUrl = "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=1080&auto=format&fit=crop&q=80",
-        mediaThumb = "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=400&auto=format&fit=crop&q=80",
-        textContent = "First day on the tarmac at JNIA airport! Dreams come true.",
-        backgroundStyle = null,
-        createdAt = "2026-10-15T16:00:00Z",
-        expiresAt = "2026-10-22T23:59:59Z",
-        viewsCount = 1240,
-        user = StoryUser(
-            id = "user-104",
-            name = "Grace Lyimo",
-            username = "gracelyimo",
-            profileImageUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&auto=format&fit=crop&q=80"
-        )
-    )
-)
+val sampleStories = emptyList<StoryType>()
 
 // ============================================================
 // USER AUTH MODELS (JobsReport UserAuth.tsx Parity)

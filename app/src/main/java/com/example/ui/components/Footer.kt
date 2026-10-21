@@ -277,7 +277,7 @@ fun TechnicalFooter(viewModel: AppViewModel? = null) {
                             context.startActivity(Intent.createChooser(intent, "Contact Support"))
                         }
                         FooterLinkItem(label = "Post Job") {
-                            viewModel.openPostJob()
+                            viewModel?.openPostJob()
                         }
                         FooterLinkItem(label = "v2.4.0 Active") {}
                     }

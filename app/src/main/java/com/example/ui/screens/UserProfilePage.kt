@@ -101,8 +101,10 @@ import coil.compose.AsyncImage
 import com.example.data.JobOpportunity
 import com.example.data.StoryType
 import com.example.data.StoryUser
+import com.example.data.isUserVerified
 import com.example.state.AppViewModel
 import com.example.state.NavRoute
+import com.example.ui.components.VerifiedBadge
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -351,7 +353,7 @@ fun UserProfilePage(
 
     val handle = if (!displayUser.username.isNullOrBlank()) "@${displayUser.username}" else (displayUser.email?.substringBefore("@")?.let { "@$it" } ?: "@user")
     val avatar = if (!displayUser.profileImageUrl.isNullOrBlank()) displayUser.profileImageUrl!! else getDefaultAvatar(displayUser.name, displayUser.id)
-    val isVerified = displayUser.isVerified == 1 || displayUser.isVerified == true || displayUser.isVerified == "1"
+    val isVerified = displayUser.isVerified == 1 || displayUser.isVerified == true || displayUser.isVerified == "1" || displayUser.isUserVerified || viewModel.isUserVerified(displayUser.id, displayUser)
 
     Box(
         modifier = Modifier
@@ -544,12 +546,7 @@ fun UserProfilePage(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     if (isVerified) {
-                                        Icon(
-                                            imageVector = Icons.Default.Verified,
-                                            contentDescription = "Verified",
-                                            tint = BrandCyan,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                        VerifiedBadge(size = 18.dp)
                                     }
                                 }
                                 Text(
@@ -673,7 +670,7 @@ fun UserProfilePage(
                                                 Brush.horizontalGradient(listOf(BrandBlue, BrandPurple))
                                             )
                                             .clickable {
-                                                viewModel.navigateTo(NavRoute.ADMIN_STUDIO)
+                                                viewModel.openPostJob(NavRoute.USER_PROFILE)
                                             }
                                     ) {
                                         Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = TextWhite, modifier = Modifier.size(15.dp))
@@ -888,7 +885,7 @@ fun UserProfilePage(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(10.dp))
                                             .background(Brush.horizontalGradient(listOf(BrandBlue, BrandPurple)))
-                                            .clickable { viewModel.openPostJob() }
+                                            .clickable { viewModel.openPostJob(NavRoute.USER_PROFILE) }
                                             .padding(horizontal = 12.dp, vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
@@ -906,7 +903,7 @@ fun UserProfilePage(
                                     title = "No job adverts yet",
                                     subtitle = if (isOwnProfile) "Post a job to attract candidates" else "This user hasn't posted any jobs yet",
                                     actionLabel = if (isOwnProfile) "Post a Job" else null,
-                                    onAction = { viewModel.openPostJob() }
+                                    onAction = { viewModel.openPostJob(NavRoute.USER_PROFILE) }
                                 )
                             }
                         } else {
@@ -920,7 +917,7 @@ fun UserProfilePage(
                                         viewModel.navigateTo(NavRoute.JOB_DETAIL)
                                     },
                                     onEdit = {
-                                        viewModel.openEditJob(job)
+                                        viewModel.openEditJob(job, NavRoute.USER_PROFILE)
                                     },
                                     onDelete = { jobToDelete = job }
                                 )
@@ -1222,6 +1219,7 @@ fun UserProfilePage(
                 story = storyItem,
                 user = authorUser,
                 currentUser = authUser,
+                isVerified = isVerified,
                 allStories = sortedStories,
                 onClose = { viewingStory = null },
                 onNext = {

@@ -39,7 +39,7 @@ import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ChevronDown
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -192,7 +192,7 @@ fun UserJobInputScreen(
         loadingCatalog = true
         val compList = viewModel.fetchAllCompaniesCatalog()
         companies = compList
-        val catList = viewModel.jobCategories.map { it.name }.filter { it.isNotBlank() }
+        val catList = viewModel.categories.map { it.name }.filter { it.isNotBlank() }
         categories = if (catList.isNotEmpty()) catList else listOf(
             "Technology & Engineering",
             "Finance & Accounting",
@@ -861,7 +861,7 @@ private fun ChooseCompanyStep(
                             singleLine = true
                         )
                         IconButton(onClick = { dropdownOpen = !dropdownOpen }) {
-                            Icon(Icons.Default.ChevronDown, contentDescription = null, tint = TextGray400)
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = TextGray400)
                         }
                     }
                 }
@@ -1277,7 +1277,7 @@ private fun JobFormStep(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(selectedRole.ifBlank { "Select Category..." }, color = TextWhite, fontSize = 13.sp)
-                            Icon(Icons.Default.ChevronDown, contentDescription = null, tint = TextGray400, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = TextGray400, modifier = Modifier.size(18.dp))
                         }
 
                         DropdownMenu(
@@ -1607,7 +1607,7 @@ private fun JobFormStep(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("ADVANCED OPTIONS", color = TextGray400, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     }
-                    Icon(imageVector = Icons.Default.ChevronDown, contentDescription = null, tint = TextGray400, modifier = Modifier.size(18.dp))
+                    Icon(imageVector = Icons.Default.KeyboardArrowDown, contentDescription = null, tint = TextGray400, modifier = Modifier.size(18.dp))
                 }
 
                 if (showAdvanced) {

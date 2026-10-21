@@ -281,6 +281,8 @@ fun IntelligenceFeedScreen(viewModel: AppViewModel) {
                 stories = viewModel.stories,
                 loading = viewModel.isStoriesLoading,
                 currentUser = viewModel.currentUser,
+                isUserVerified = { uid, u -> viewModel.isUserVerified(uid, u) },
+                authorProvider = { uid, u -> viewModel.getResolvedUser(uid, u) },
                 onCreateStory = {
                     if (viewModel.currentUser != null) {
                         viewModel.isCreateStoryOpen = true
@@ -292,7 +294,8 @@ fun IntelligenceFeedScreen(viewModel: AppViewModel) {
                     viewModel.viewingStory = story
                 },
                 onProfileClick = { authorId ->
-                    val storyAuthor = viewModel.stories.firstOrNull { it.userId == authorId }?.user
+                    val fallback = viewModel.stories.firstOrNull { it.userId == authorId }?.user
+                    val storyAuthor = viewModel.getResolvedUser(authorId, fallback)
                     viewModel.openUserProfile(storyAuthor)
                 },
                 onRequestLogin = {
