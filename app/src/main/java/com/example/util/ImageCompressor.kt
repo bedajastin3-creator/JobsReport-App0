@@ -10,7 +10,6 @@ import android.provider.OpenableColumns
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
-import java.io.InputStream
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -27,7 +26,7 @@ data class CompressedMediaResult(
 
 object ImageCompressor {
     private const val THUMB_MAX_DIMENSION = 400
-    private const val THUMB_QUALITY = 80 // 0.8 in web canvas
+    private const val THUMB_QUALITY = 80
     private const val MAIN_MAX_DIMENSION = 1920
     private const val MAIN_QUALITY = 85
 
@@ -35,53 +34,46 @@ object ImageCompressor {
         runCatching {
             val contentResolver = context.contentResolver
 
-            // 1. Get original file name
             var originalName = "story_${System.currentTimeMillis()}.jpg"
             contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                     if (nameIndex != -1) {
                         val name = cursor.getString(nameIndex)
-                        if (!name.isNullOrBlank()) {
-                            originalName = name
-                        }
+                        if (!name.isNullOrBlank()) originalName = name
                     }
                 }
             }
 
+            // FIX #2: safe baseName
             val baseName = originalName.substringBeforeLast(".")
+                .ifBlank { "story_${System.currentTimeMillis()}" }
 
-            // 2. Read EXIF orientation
             var orientation = ExifInterface.ORIENTATION_NORMAL
             try {
                 contentResolver.openInputStream(uri)?.use { stream ->
-                    val exif = ExifInterface(stream)
-                    orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                    orientation = ExifInterface(stream)
+                        .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
                 }
             } catch (_: Exception) {}
 
-            // 3. Decode bitmap
             val decodedBitmap: Bitmap = contentResolver.openInputStream(uri)?.use { stream ->
                 BitmapFactory.decodeStream(stream)
             } ?: throw IllegalStateException("Could not decode image from URI")
 
-            // 4. Rotate according to EXIF
             val rotatedBitmap = rotateBitmap(decodedBitmap, orientation)
 
-            // 5. Generate Main Image (constrained to max 1920 for optimal network performance)
             val mainBitmap = scaleBitmapToMax(rotatedBitmap, MAIN_MAX_DIMENSION)
             val mainStream = ByteArrayOutputStream()
             mainBitmap.compress(Bitmap.CompressFormat.JPEG, MAIN_QUALITY, mainStream)
             val mainBytes = mainStream.toByteArray()
 
-            // 6. Generate Thumbnail (exact match to Story.tsx: max 400px, 0.8 quality WebP)
             val thumbScale = min(1f, THUMB_MAX_DIMENSION.toFloat() / max(rotatedBitmap.width, rotatedBitmap.height).toFloat())
             val thumbW = max(1, (rotatedBitmap.width * thumbScale).roundToInt())
             val thumbH = max(1, (rotatedBitmap.height * thumbScale).roundToInt())
             val thumbBitmap = Bitmap.createScaledBitmap(rotatedBitmap, thumbW, thumbH, true)
 
-            val thumbStream = ByteArrayOutputStream()
-            // Android 10+ has WEBP_LOSSY; Android 7+ (API 24+) supports WEBP
+            // FIX #1: mime + filename match actual bytes
             @Suppress("DEPRECATION")
             val webpFormat = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                 Bitmap.CompressFormat.WEBP_LOSSY
@@ -89,14 +81,24 @@ object ImageCompressor {
                 Bitmap.CompressFormat.WEBP
             }
 
-            val thumbCompressed = thumbBitmap.compress(webpFormat, THUMB_QUALITY, thumbStream)
-            val thumbBytes = if (thumbCompressed && thumbStream.size() > 0) {
-                thumbStream.toByteArray()
+            val thumbStream = ByteArrayOutputStream()
+            val webpOk = try {
+                thumbBitmap.compress(webpFormat, THUMB_QUALITY, thumbStream) && thumbStream.size() > 0
+            } catch (_: Exception) { false }
+
+            val thumbBytes: ByteArray
+            val thumbMime: String
+            val thumbFileName: String
+            if (webpOk) {
+                thumbBytes = thumbStream.toByteArray()
+                thumbMime = "image/webp"
+                thumbFileName = "$baseName-thumb.webp"
             } else {
-                // Fallback to JPEG if WEBP fails
                 val fallbackStream = ByteArrayOutputStream()
                 thumbBitmap.compress(Bitmap.CompressFormat.JPEG, THUMB_QUALITY, fallbackStream)
-                fallbackStream.toByteArray()
+                thumbBytes = fallbackStream.toByteArray()
+                thumbMime = "image/jpeg"
+                thumbFileName = "$baseName-thumb.jpg"
             }
 
             CompressedMediaResult(
@@ -104,8 +106,8 @@ object ImageCompressor {
                 mainMime = "image/jpeg",
                 mainFileName = "$baseName.jpg",
                 thumbBytes = thumbBytes,
-                thumbMime = if (thumbCompressed) "image/webp" else "image/jpeg",
-                thumbFileName = "$baseName-thumb.webp",
+                thumbMime = thumbMime,
+                thumbFileName = thumbFileName,
                 previewBitmap = thumbBitmap
             )
         }
