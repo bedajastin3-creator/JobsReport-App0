@@ -239,7 +239,7 @@ fun StoryScreen(viewModel: AppViewModel) {
                 }
             }
 
-            // STORY REEL (Horizontal Carousel)
+            // STORY REEL (Horizontal Carousel) — keeps its card chrome here
             StoryReel(
                 stories = activeStories,
                 loading = viewModel.isStoriesLoading,
@@ -352,7 +352,7 @@ fun StoryScreen(viewModel: AppViewModel) {
 }
 
 // ============================================================
-// GLOBAL STORY MODALS & OVERLAYS (Accessible everywhere: Home Screen, Stories, Jobs)
+// GLOBAL STORY MODALS & OVERLAYS
 // ============================================================
 @Composable
 fun GlobalStoryModals(viewModel: AppViewModel) {
@@ -407,7 +407,7 @@ fun GlobalStoryModals(viewModel: AppViewModel) {
         )
     }
 
-    // CREATE STORY MODAL (Never accessible if logged out)
+    // CREATE STORY MODAL
     if (viewModel.isCreateStoryOpen) {
         if (viewModel.userToken == null) {
             viewModel.isCreateStoryOpen = false
@@ -435,12 +435,10 @@ fun GlobalStoryModals(viewModel: AppViewModel) {
             )
         }
     }
-
-    // USER PROFILE / TOKEN MODAL
 }
 
 // ============================================================
-// STORY REEL (Horizontal Carousel — Instagram/JobsReport Web Style)
+// STORY REEL (Horizontal Carousel) — now supports flat mode
 // ============================================================
 @Composable
 fun StoryReel(
@@ -452,7 +450,8 @@ fun StoryReel(
     onCreateStory: () -> Unit,
     onViewStory: (StoryType) -> Unit,
     onProfileClick: (String) -> Unit,
-    onRequestLogin: () -> Unit
+    onRequestLogin: () -> Unit,
+    flat: Boolean = false        // ← NEW: no card chrome when true
 ) {
     val active = remember(stories) { stories.filter { !isStoryExpired(it) } }
 
@@ -472,19 +471,26 @@ fun StoryReel(
         out
     }
 
-    Box(
-        modifier = Modifier
+    val baseModifier = if (flat) {
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    } else {
+        Modifier
             .fillMaxWidth()
             .background(StoryBgCard)
             .border(width = 1.dp, color = StoryBorderSlate)
             .padding(vertical = 12.dp)
-    ) {
+    }
+
+    Box(modifier = baseModifier) {
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 12.dp),
+            contentPadding = PaddingValues(
+                horizontal = if (flat) 16.dp else 12.dp
+            ),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // First item: CREATE STORY CARD
             item {
                 CreateStoryCard(
                     currentUser = currentUser,
@@ -495,7 +501,6 @@ fun StoryReel(
                 )
             }
 
-            // User stories cards
             items(uniqueUsers, key = { it.id }) { story ->
                 val resolvedAuthor = authorProvider?.invoke(story.userId, story.user) ?: story.user
                 val isVerified = isUserVerified?.invoke(story.userId, resolvedAuthor)
@@ -535,7 +540,6 @@ fun CreateStoryCard(
             .clickable(onClick = onClick)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top 75% Image / Avatar
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -553,7 +557,6 @@ fun CreateStoryCard(
                 )
             }
 
-            // Bottom 25% Label Area
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -571,7 +574,6 @@ fun CreateStoryCard(
             }
         }
 
-        // Floating Center Plus Button
         Box(
             modifier = Modifier
                 .align(Alignment.Center)
@@ -632,7 +634,6 @@ fun StoryReelCard(
             .border(1.dp, StoryBorderSlate, RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
     ) {
-        // Media or Gradient Background
         if (isText) {
             Box(
                 modifier = Modifier
@@ -675,7 +676,6 @@ fun StoryReelCard(
             }
         }
 
-        // Dark dimming overlay for contrast
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -690,7 +690,6 @@ fun StoryReelCard(
                 )
         )
 
-        // Top Left: Author Avatar with Blue Border & Verified Badge
         Box(
             modifier = Modifier
                 .padding(8.dp)
@@ -722,7 +721,6 @@ fun StoryReelCard(
             }
         }
 
-        // Top Right: Plus button if it's my story
         if (isMine) {
             Box(
                 modifier = Modifier
@@ -748,7 +746,6 @@ fun StoryReelCard(
             }
         }
 
-        // Bottom: Author Name with Verified Tick
         Row(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -843,7 +840,6 @@ fun StoryGridCard(
             }
         }
 
-        // Bottom Info Gradient Overlay
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -897,7 +893,7 @@ fun StoryGridCard(
 }
 
 // ============================================================
-// STORY VIEWER MODAL (Full Screen with Timer, Swiping, Linkify)
+// STORY VIEWER MODAL
 // ============================================================
 @Composable
 fun StoryViewer(
@@ -935,12 +931,8 @@ fun StoryViewer(
     val thumbUrl = story.mediaThumb ?: originalUrl
     val displayUrl = if (originalLoaded && originalUrl.isNotBlank()) originalUrl else thumbUrl
 
-    // Record view once per story
-    LaunchedEffect(story.id) {
-        onViewRecorded(story.id)
-    }
+    LaunchedEffect(story.id) { onViewRecorded(story.id) }
 
-    // Story 5-second progress ticker (DEFAULT_STORY_DURATION_MS = 5000)
     LaunchedEffect(story.id, isPaused) {
         if (!isPaused) {
             val stepMs = 50L
@@ -949,9 +941,7 @@ fun StoryViewer(
                 delay(stepMs)
                 progress += (1f / totalSteps)
             }
-            if (progress >= 1f) {
-                onNext()
-            }
+            if (progress >= 1f) onNext()
         }
     }
 
@@ -975,25 +965,19 @@ fun StoryViewer(
                         },
                         onTap = { offset ->
                             val width = size.width
-                            if (offset.x < width * 0.35f) {
-                                onPrev()
-                            } else if (offset.x > width * 0.65f) {
-                                onNext()
-                            } else {
-                                isPaused = !isPaused
-                            }
+                            if (offset.x < width * 0.35f) onPrev()
+                            else if (offset.x > width * 0.65f) onNext()
+                            else isPaused = !isPaused
                         }
                     )
                 }
         ) {
-            // Center Container (max 480dp width like Web)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .align(Alignment.Center)
                     .background(StoryBgSurface)
             ) {
-                // Content Layer
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -1032,15 +1016,10 @@ fun StoryViewer(
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
-                        Text(
-                            text = "Media unavailable",
-                            color = TextMuted,
-                            fontSize = 14.sp
-                        )
+                        Text("Media unavailable", color = TextMuted, fontSize = 14.sp)
                     }
                 }
 
-                // Top Segmented Progress Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1070,7 +1049,6 @@ fun StoryViewer(
                     }
                 }
 
-                // Top Header (Author info + Actions)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1083,7 +1061,6 @@ fun StoryViewer(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Author info (Clickable to open UserProfile)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1109,9 +1086,7 @@ fun StoryViewer(
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold
                                 )
-                                if (isVerified) {
-                                    VerifiedBadge(size = 16.dp)
-                                }
+                                if (isVerified) VerifiedBadge(size = 16.dp)
                             }
                             Text(
                                 text = formatStoryTime(story.createdAt),
@@ -1121,12 +1096,10 @@ fun StoryViewer(
                         }
                     }
 
-                    // Action buttons
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        // Share
                         IconButton(
                             onClick = {
                                 val sendIntent = Intent().apply {
@@ -1141,15 +1114,9 @@ fun StoryViewer(
                                 .clip(CircleShape)
                                 .background(Color.White.copy(alpha = 0.15f))
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Share,
-                                contentDescription = "Share Story",
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
+                            Icon(Icons.Default.Share, "Share Story", tint = Color.White, modifier = Modifier.size(16.dp))
                         }
 
-                        // Delete button (for story author)
                         if (isAuthor) {
                             IconButton(
                                 onClick = { showDeleteConfirm = true },
@@ -1158,16 +1125,10 @@ fun StoryViewer(
                                     .clip(CircleShape)
                                     .background(StoryDangerRed.copy(alpha = 0.85f))
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Delete Story",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                Icon(Icons.Default.Delete, "Delete Story", tint = Color.White, modifier = Modifier.size(16.dp))
                             }
                         }
 
-                        // Close button
                         IconButton(
                             onClick = onClose,
                             modifier = Modifier
@@ -1176,17 +1137,11 @@ fun StoryViewer(
                                 .background(StoryBgCard.copy(alpha = 0.8f))
                                 .border(1.dp, StoryBorderSlate, CircleShape)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Icon(Icons.Default.Close, "Close", tint = Color.White, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
 
-                // Side Navigation Arrows (Floating)
                 IconButton(
                     onClick = onPrev,
                     modifier = Modifier
@@ -1196,12 +1151,7 @@ fun StoryViewer(
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.15f))
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.ChevronLeft,
-                        contentDescription = "Previous",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Icon(Icons.Default.ChevronLeft, "Previous", tint = Color.White, modifier = Modifier.size(22.dp))
                 }
 
                 IconButton(
@@ -1213,15 +1163,9 @@ fun StoryViewer(
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.15f))
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = "Next",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Icon(Icons.Default.ChevronRight, "Next", tint = Color.White, modifier = Modifier.size(22.dp))
                 }
 
-                // Bottom Footer (Views counter + Share shortcut)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1239,12 +1183,7 @@ fun StoryViewer(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Visibility,
-                            contentDescription = "Views",
-                            tint = Color.White.copy(alpha = 0.8f),
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Icon(Icons.Default.Visibility, "Views", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
                         Text(
                             text = "${formatStoryCount(story.viewsCount ?: 0)} views",
                             color = Color.White.copy(alpha = 0.8f),
@@ -1268,23 +1207,12 @@ fun StoryViewer(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Share",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Icon(Icons.Default.Share, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Text("Share", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
 
-            // Delete Confirmation Dialog
             if (showDeleteConfirm) {
                 Dialog(onDismissRequest = { showDeleteConfirm = false }) {
                     Box(
@@ -1302,46 +1230,24 @@ fun StoryViewer(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = null,
-                                        tint = StoryDangerRed,
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                    Icon(Icons.Default.Delete, null, tint = StoryDangerRed, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Delete Story",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
-                                    )
+                                    Text("Delete Story", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 }
                                 IconButton(
                                     onClick = { showDeleteConfirm = false },
                                     modifier = Modifier.size(28.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Close",
-                                        tint = TextSecondary
-                                    )
+                                    Icon(Icons.Default.Close, "Close", tint = TextSecondary)
                                 }
                             }
 
                             Spacer(modifier = Modifier.height(14.dp))
-                            Text(
-                                text = "Delete this story?",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp,
-                                textAlign = TextAlign.Center
-                            )
+                            Text("Delete this story?", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp, textAlign = TextAlign.Center)
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "This story will be permanently deleted. This action cannot be undone.",
-                                color = TextSecondary,
-                                fontSize = 13.sp,
-                                textAlign = TextAlign.Center
+                                "This story will be permanently deleted. This action cannot be undone.",
+                                color = TextSecondary, fontSize = 13.sp, textAlign = TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(20.dp))
 
@@ -1358,12 +1264,7 @@ fun StoryViewer(
                                         .clickable { showDeleteConfirm = false },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = "Cancel",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp
-                                    )
+                                    Text("Cancel", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                 }
 
                                 Box(
@@ -1381,18 +1282,9 @@ fun StoryViewer(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (isDeleting) {
-                                        CircularProgressIndicator(
-                                            color = Color.White,
-                                            strokeWidth = 2.dp,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                                     } else {
-                                        Text(
-                                            text = "Delete",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp
-                                        )
+                                        Text("Delete", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                     }
                                 }
                             }
@@ -1405,7 +1297,7 @@ fun StoryViewer(
 }
 
 // ============================================================
-// CREATE STORY MODAL (Produces thumbnail, exact colors/endpoints)
+// CREATE STORY MODAL
 // ============================================================
 @Composable
 fun CreateStoryModal(
@@ -1417,7 +1309,7 @@ fun CreateStoryModal(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    var mode by remember { mutableStateOf<String>("text") } // "text" or "image"
+    var mode by remember { mutableStateOf<String>("text") }
     var textContent by remember { mutableStateOf("") }
     var backgroundStyle by remember { mutableStateOf(STORY_BACKGROUNDS[0]) }
 
@@ -1430,7 +1322,6 @@ fun CreateStoryModal(
     var isSharing by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Deadline defaults to 7 days from today
     val defaultDeadline = remember {
         val cal = Calendar.getInstance()
         cal.add(Calendar.DAY_OF_YEAR, 7)
@@ -1438,7 +1329,6 @@ fun CreateStoryModal(
     }
     var deadlineDate by remember { mutableStateOf(defaultDeadline) }
 
-    // Android Modern Photo Picker (Zero permissions needed)
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -1454,7 +1344,6 @@ fun CreateStoryModal(
                     val result = compression.getOrThrow()
                     compressedResult = result
 
-                    // Upload main image + compressed thumbnail to /api/upload
                     val uploadResult = onUpload(
                         result.mainBytes,
                         result.mainFileName,
@@ -1523,7 +1412,6 @@ fun CreateStoryModal(
                 .fillMaxSize()
                 .background(StoryBgDeep)
         ) {
-            // Top App Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1533,7 +1421,6 @@ fun CreateStoryModal(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Discard Button
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
@@ -1541,22 +1428,11 @@ fun CreateStoryModal(
                         .clickable(onClick = onClose)
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    Text(
-                        text = "Discard",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
+                    Text("Discard", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
 
-                Text(
-                    text = "Create Story",
-                    color = Color.White,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 17.sp
-                )
+                Text("Create Story", color = Color.White, fontWeight = FontWeight.Black, fontSize = 17.sp)
 
-                // Share Button
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
@@ -1565,23 +1441,13 @@ fun CreateStoryModal(
                         .padding(horizontal = 18.dp, vertical = 8.dp)
                 ) {
                     if (isSharing) {
-                        CircularProgressIndicator(
-                            color = Color.White,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(16.dp)
-                        )
+                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
                     } else {
-                        Text(
-                            text = "Share",
-                            color = Color.White,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 13.sp
-                        )
+                        Text("Share", color = Color.White, fontWeight = FontWeight.Black, fontSize = 13.sp)
                     }
                 }
             }
 
-            // Middle Story Canvas
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1625,7 +1491,6 @@ fun CreateStoryModal(
                             .padding(16.dp)
                     )
                 } else {
-                    // Image Mode
                     if (selectedImageUri != null) {
                         Box(modifier = Modifier.fillMaxSize()) {
                             AsyncImage(
@@ -1635,7 +1500,6 @@ fun CreateStoryModal(
                                 modifier = Modifier.fillMaxSize()
                             )
 
-                            // Remove Image Button
                             IconButton(
                                 onClick = {
                                     selectedImageUri = null
@@ -1650,12 +1514,7 @@ fun CreateStoryModal(
                                     .clip(CircleShape)
                                     .background(Color.Black.copy(alpha = 0.6f))
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Remove Image",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                                Icon(Icons.Default.Delete, "Remove Image", tint = Color.White, modifier = Modifier.size(18.dp))
                             }
 
                             if (isUploading) {
@@ -1670,23 +1529,16 @@ fun CreateStoryModal(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        CircularProgressIndicator(
-                                            color = StoryPrimaryBlue,
-                                            strokeWidth = 2.dp,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                        CircularProgressIndicator(color = StoryPrimaryBlue, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                                         Text(
-                                            text = "Compressing & uploading…",
-                                            color = Color.White,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
+                                            "Compressing & uploading…",
+                                            color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
                             }
                         }
                     } else {
-                        // Empty Image Placeholder
                         Column(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
@@ -1706,32 +1558,17 @@ fun CreateStoryModal(
                                     .border(1.dp, StoryBorderSlate, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Image,
-                                    contentDescription = "Select Image",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(32.dp)
-                                )
+                                Icon(Icons.Default.Image, "Select Image", tint = Color.White, modifier = Modifier.size(32.dp))
                             }
                             Spacer(modifier = Modifier.height(14.dp))
-                            Text(
-                                text = "Select an Image",
-                                color = Color.White,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Black
-                            )
+                            Text("Select an Image", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "JPG, PNG, WEBP — auto-generates thumbnail",
-                                color = TextMuted,
-                                fontSize = 12.sp
-                            )
+                            Text("JPG, PNG, WEBP — auto-generates thumbnail", color = TextMuted, fontSize = 12.sp)
                         }
                     }
                 }
             }
 
-            // Bottom Controls Area
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1740,7 +1577,6 @@ fun CreateStoryModal(
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Background Gradient Palette Selector (if text mode)
                 if (mode == "text") {
                     LazyRow(
                         modifier = Modifier.fillMaxWidth(),
@@ -1764,7 +1600,6 @@ fun CreateStoryModal(
                     }
                 }
 
-                // Deadline Selector Row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1782,15 +1617,12 @@ fun CreateStoryModal(
                             DatePickerDialog(
                                 context,
                                 { _, year, month, dayOfMonth ->
-                                    val formatted = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
-                                    deadlineDate = formatted
+                                    deadlineDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
                                 },
                                 cal.get(Calendar.YEAR),
                                 cal.get(Calendar.MONTH),
                                 cal.get(Calendar.DAY_OF_MONTH)
-                            ).apply {
-                                datePicker.minDate = System.currentTimeMillis()
-                            }.show()
+                            ).apply { datePicker.minDate = System.currentTimeMillis() }.show()
                         }
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1800,20 +1632,9 @@ fun CreateStoryModal(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CalendarToday,
-                            contentDescription = "Deadline",
-                            tint = Color.White.copy(alpha = 0.8f),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Deadline",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Icon(Icons.Default.CalendarToday, "Deadline", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(16.dp))
+                        Text("Deadline", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
-
                     Text(
                         text = deadlineDate,
                         color = LightBlue,
@@ -1823,13 +1644,11 @@ fun CreateStoryModal(
                     )
                 }
 
-                // Mode Toggle Row ([Text] / [Image] + Image Picker shortcut)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Segmented Toggle
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(14.dp))
@@ -1838,7 +1657,6 @@ fun CreateStoryModal(
                             .padding(4.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        // Text Button
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
@@ -1846,26 +1664,20 @@ fun CreateStoryModal(
                                 .clickable { mode = "text" }
                                 .padding(horizontal = 18.dp, vertical = 8.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Icon(
-                                    imageVector = Icons.Default.TextFields,
-                                    contentDescription = "Text",
+                                    Icons.Default.TextFields, "Text",
                                     tint = if (mode == "text") Color.White else Color.White.copy(alpha = 0.6f),
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
-                                    text = "Text",
+                                    "Text",
                                     color = if (mode == "text") Color.White else Color.White.copy(alpha = 0.6f),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Black
+                                    fontSize = 13.sp, fontWeight = FontWeight.Black
                                 )
                             }
                         }
 
-                        // Image Button
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
@@ -1873,27 +1685,21 @@ fun CreateStoryModal(
                                 .clickable { mode = "image" }
                                 .padding(horizontal = 18.dp, vertical = 8.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Icon(
-                                    imageVector = Icons.Default.Image,
-                                    contentDescription = "Image",
+                                    Icons.Default.Image, "Image",
                                     tint = if (mode == "image") Color.White else Color.White.copy(alpha = 0.6f),
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
-                                    text = "Image",
+                                    "Image",
                                     color = if (mode == "image") Color.White else Color.White.copy(alpha = 0.6f),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Black
+                                    fontSize = 13.sp, fontWeight = FontWeight.Black
                                 )
                             }
                         }
                     }
 
-                    // Fast Image Picker Icon Button
                     IconButton(
                         onClick = {
                             photoPickerLauncher.launch(
@@ -1905,16 +1711,10 @@ fun CreateStoryModal(
                             .clip(CircleShape)
                             .background(Color.White.copy(alpha = 0.1f))
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add image file",
-                            tint = Color.White.copy(alpha = 0.9f),
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Icon(Icons.Default.Add, "Add image file", tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(20.dp))
                     }
                 }
 
-                // Error alert
                 if (!errorMessage.isNullOrBlank()) {
                     Box(
                         modifier = Modifier
@@ -1924,21 +1724,11 @@ fun CreateStoryModal(
                             .border(1.dp, StoryDangerRed.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ErrorOutline,
-                                contentDescription = "Error",
-                                tint = StoryDangerRed,
-                                modifier = Modifier.size(16.dp)
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.ErrorOutline, "Error", tint = StoryDangerRed, modifier = Modifier.size(16.dp))
                             Text(
-                                text = errorMessage.orEmpty(),
-                                color = StoryDangerRed,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
+                                errorMessage.orEmpty(),
+                                color = StoryDangerRed, fontSize = 12.sp, fontWeight = FontWeight.Medium
                             )
                         }
                     }
@@ -1949,7 +1739,7 @@ fun CreateStoryModal(
 }
 
 // ============================================================
-// USER PROFILE / JOBSREPORT_TOKEN MODAL
+// USER PROFILE / TOKEN MODAL
 // ============================================================
 @Composable
 fun UserProfileModal(
@@ -1979,32 +1769,14 @@ fun UserProfileModal(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text(
-                            text = "Story Author Profile",
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Black
-                        )
-                        Text(
-                            text = "Manage your JobsReport story identity",
-                            color = TextSecondary,
-                            fontSize = 12.sp
-                        )
+                        Text("Story Author Profile", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                        Text("Manage your JobsReport story identity", color = TextSecondary, fontSize = 12.sp)
                     }
-
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = TextSecondary
-                        )
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, "Close", tint = TextSecondary)
                     }
                 }
 
-                // Avatar display
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
@@ -2021,10 +1793,8 @@ fun UserProfileModal(
                 }
 
                 OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Display Name") },
-                    singleLine = true,
+                    value = name, onValueChange = { name = it },
+                    label = { Text("Display Name") }, singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = StoryPrimaryBlue,
                         unfocusedBorderColor = StoryBorderSlate,
@@ -2035,10 +1805,8 @@ fun UserProfileModal(
                 )
 
                 OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text("Username (@handle)") },
-                    singleLine = true,
+                    value = username, onValueChange = { username = it },
+                    label = { Text("Username (@handle)") }, singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = StoryPrimaryBlue,
                         unfocusedBorderColor = StoryBorderSlate,
@@ -2049,8 +1817,7 @@ fun UserProfileModal(
                 )
 
                 OutlinedTextField(
-                    value = token,
-                    onValueChange = { token = it },
+                    value = token, onValueChange = { token = it },
                     label = { Text("Website Token (jobsreport_token)") },
                     placeholder = { Text("Optional Bearer JWT token from web", color = TextMuted) },
                     singleLine = true,
@@ -2069,38 +1836,23 @@ fun UserProfileModal(
                 ) {
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(StoryBorderSlate)
-                            .clickable(onClick = onDismiss),
+                            .weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp))
+                            .background(StoryBorderSlate).clickable(onClick = onDismiss),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "Cancel",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
+                        Text("Cancel", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
 
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp))
                             .background(StoryPrimaryBlue)
                             .clickable {
                                 onSave(name.trim(), username.trim().ifBlank { null }, email.trim().ifBlank { null }, token.trim().ifBlank { null })
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "Save Profile",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
+                        Text("Save Profile", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
             }
@@ -2109,7 +1861,7 @@ fun UserProfileModal(
 }
 
 // ============================================================
-// LINKIFY TEXT (Interactive clickable links & emails)
+// LINKIFY TEXT
 // ============================================================
 @Composable
 fun LinkifyText(
@@ -2128,9 +1880,7 @@ fun LinkifyText(
             val end = matcher.end()
             val match = matcher.group()
 
-            if (start > lastIdx) {
-                append(text.substring(lastIdx, start))
-            }
+            if (start > lastIdx) append(text.substring(lastIdx, start))
 
             val isEmail = match.contains("@") && !match.startsWith("http")
             val targetUrl = when {
@@ -2153,9 +1903,7 @@ fun LinkifyText(
 
             lastIdx = end
         }
-        if (lastIdx < text.length) {
-            append(text.substring(lastIdx))
-        }
+        if (lastIdx < text.length) append(text.substring(lastIdx))
     }
 
     ClickableText(
@@ -2166,8 +1914,7 @@ fun LinkifyText(
             annotatedString.getStringAnnotations(tag = "URL", start = offset, end = offset)
                 .firstOrNull()?.let { annotation ->
                     try {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(annotation.item))
-                        context.startActivity(intent)
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(annotation.item)))
                     } catch (_: Exception) {}
                 }
         }
