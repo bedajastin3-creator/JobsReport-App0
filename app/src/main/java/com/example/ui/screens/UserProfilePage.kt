@@ -5,6 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -105,17 +108,17 @@ import com.example.data.isUserVerified
 import com.example.state.AppViewModel
 import com.example.state.NavRoute
 import com.example.ui.components.VerifiedBadge
+import com.example.util.ImageCompressor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // ============================================================
-// CONSTANTS (Exact values from UserProfile.tsx)
+// CONSTANTS
 // ============================================================
 private const val PROFILE_JOBS_PER_PAGE = 6
 private const val STORIES_PER_PAGE = 6
 private const val TOP_STORIES_COUNT = 5
 
-// Exact color palette from UserProfile.tsx
 private val PageDarkBg = Color(0xFF050B18)
 private val DialogDarkBg = Color(0xFF0B1120)
 private val BrandBlue = Color(0xFF1877F2)
@@ -134,7 +137,7 @@ private val TextGray500 = Color(0xFF6B7280)
 private val TextGray600 = Color(0xFF4B5563)
 
 // ============================================================
-// HELPERS (Exact parity with UserProfile.tsx)
+// HELPERS
 // ============================================================
 private fun getDefaultAvatar(name: String, seed: String): String {
     val colors = listOf("1877F2", "45BD62", "F3425F", "F7B928", "9360F7")
@@ -188,7 +191,7 @@ private fun isStoryExpired(story: StoryType): Boolean {
 }
 
 // ============================================================
-// MAIN COMPONENT: UserProfilePage (Exact UserProfile.tsx parity)
+// MAIN COMPONENT
 // ============================================================
 @Composable
 fun UserProfilePage(
@@ -200,14 +203,13 @@ fun UserProfilePage(
     val scope = rememberCoroutineScope()
     BackHandler { onClose() }
 
-    // Target User: viewingProfileUser or currentUser
     val baseUser = viewModel.viewingProfileUser ?: viewModel.currentUser
     var user by remember(baseUser?.id) { mutableStateOf(baseUser) }
     var jobs by remember { mutableStateOf<List<JobOpportunity>>(emptyList()) }
     var stories by remember { mutableStateOf<List<StoryType>>(emptyList()) }
 
     var loading by remember { mutableStateOf(false) }
-    var activeTab by remember { mutableStateOf("jobs") } // "jobs", "stories", "about"
+    var activeTab by remember { mutableStateOf("jobs") }
     var isEditing by remember { mutableStateOf(false) }
     var following by remember(user?.id) {
         mutableStateOf(user?.isFollowing == true || (user != null && viewModel.isUserFollowed(user!!.id)))
@@ -221,11 +223,19 @@ fun UserProfilePage(
     var jobToDelete by remember { mutableStateOf<JobOpportunity?>(null) }
     var shareToast by remember { mutableStateOf<String?>(null) }
 
+    // ── Upload state ─────────────────────────────────────────
+    var uploadingCover by remember { mutableStateOf(false) }
+    var uploadingAvatar by remember { mutableStateOf(false) }
+    var uploadingDialogCover by remember { mutableStateOf(false) }
+    var uploadingDialogAvatar by remember { mutableStateOf(false) }
+    var pickTarget by remember { mutableStateOf<String?>(null) }
+    var pendingCoverUrl by remember { mutableStateOf<String?>(null) }
+    var pendingAvatarUrl by remember { mutableStateOf<String?>(null) }
+
     val authUser = viewModel.currentUser
     val isOwnProfile = authUser != null && user != null && authUser.id == user?.id
     val isAdmin = viewModel.isAdmin
 
-    // Auto-dismiss share toast
     LaunchedEffect(shareToast) {
         if (shareToast != null) {
             delay(2500)
@@ -233,13 +243,11 @@ fun UserProfilePage(
         }
     }
 
-    // Reset pagination on tab change
     LaunchedEffect(activeTab) {
         jobsVisible = PROFILE_JOBS_PER_PAGE
         storiesVisible = STORIES_PER_PAGE
     }
 
-    // Load Profile Data from API with local fallback
     LaunchedEffect(baseUser?.id) {
         if (baseUser != null) {
             loading = true
@@ -248,46 +256,29 @@ fun UserProfilePage(
                 user = fetchedUser
                 following = fetchedUser.isFollowing == true || viewModel.isUserFollowed(fetchedUser.id)
             }
-            // Fetch User Jobs
-            val fetchedJobs = viewModel.fetchUserJobs(baseUser.id)
-            jobs = fetchedJobs
-
-            // Filter active stories
-            val userStoryList = viewModel.stories.filter { it.userId == baseUser.id && !isStoryExpired(it) }
-            stories = userStoryList
+            jobs = viewModel.fetchUserJobs(baseUser.id)
+            stories = viewModel.stories.filter { it.userId == baseUser.id && !isStoryExpired(it) }
             loading = false
         }
     }
 
-    // Sorted jobs
     val sortedJobs = remember(jobs) {
         jobs.sortedByDescending { parseServerTime(it.postedAt) }
     }
-    val visibleJobs = remember(sortedJobs, jobsVisible) {
-        sortedJobs.take(jobsVisible)
-    }
+    val visibleJobs = remember(sortedJobs, jobsVisible) { sortedJobs.take(jobsVisible) }
     val hasMoreJobs = jobsVisible < sortedJobs.size
 
-    // Sorted stories
     val sortedStories = remember(stories, viewModel.stories, user?.id) {
         val list = if (user != null) viewModel.stories.filter { it.userId == user!!.id && !isStoryExpired(it) } else emptyList()
         list.sortedByDescending { parseServerTime(it.createdAt) }
     }
-    val topStories = remember(sortedStories) {
-        sortedStories.take(TOP_STORIES_COUNT)
-    }
-    val visibleStories = remember(sortedStories, storiesVisible) {
-        sortedStories.take(storiesVisible)
-    }
+    val topStories = remember(sortedStories) { sortedStories.take(TOP_STORIES_COUNT) }
+    val visibleStories = remember(sortedStories, storiesVisible) { sortedStories.take(storiesVisible) }
     val hasMoreStories = storiesVisible < sortedStories.size
 
-    // Handle Follow
     fun handleFollow() {
         val targetUser = user ?: return
-        if (viewModel.userToken == null) {
-            viewModel.openAuth()
-            return
-        }
+        if (viewModel.userToken == null) { viewModel.openAuth(); return }
         if (followLoading) return
         followLoading = true
         val next = !following
@@ -303,15 +294,12 @@ fun UserProfilePage(
         }
     }
 
-    // Handle Share Profile
     fun handleShareProfile() {
         val targetUser = user ?: return
         val handleStr = targetUser.username ?: targetUser.id
         val profileUrl = "https://jobsreport.online/u/$handleStr"
         clipboardManager.setText(AnnotatedString(profileUrl))
         shareToast = "Link copied to clipboard!"
-
-        // Also launch Android share sheet
         try {
             val sendIntent = Intent().apply {
                 action = Intent.ACTION_SEND
@@ -322,7 +310,6 @@ fun UserProfilePage(
         } catch (_: Exception) {}
     }
 
-    // Handle Delete Job
     fun handleDeleteJob(job: JobOpportunity) {
         scope.launch {
             viewModel.deleteUserJob(job.id)
@@ -333,7 +320,6 @@ fun UserProfilePage(
         }
     }
 
-    // Handle Delete Story
     fun handleDeleteStory(storyId: String) {
         scope.launch {
             viewModel.deleteStory(storyId)
@@ -351,22 +337,92 @@ fun UserProfilePage(
         return
     }
 
+    // ── Image picker launcher (routes by pickTarget) ─────────
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        val target = pickTarget
+        pickTarget = null
+        if (uri == null || target == null) return@rememberLauncherForActivityResult
+
+        when (target) {
+            "cover" -> {
+                uploadingCover = true
+                scope.launch {
+                    val url = viewModel.uploadImage(context, uri)
+                    if (url != null) {
+                        viewModel.saveProfileApi(
+                            name = displayUser.name,
+                            headline = displayUser.headline,
+                            bio = displayUser.bio,
+                            work = displayUser.work,
+                            education = displayUser.education,
+                            location = displayUser.location,
+                            website = displayUser.website,
+                            avatarUrl = displayUser.profileImageUrl,
+                            coverUrl = url
+                        )
+                        user = user?.copy(coverImageUrl = url)
+                        shareToast = "Cover updated!"
+                    } else {
+                        shareToast = viewModel.uploadError ?: "Cover upload failed"
+                    }
+                    uploadingCover = false
+                }
+            }
+            "avatar" -> {
+                uploadingAvatar = true
+                scope.launch {
+                    val url = viewModel.uploadImage(context, uri)
+                    if (url != null) {
+                        viewModel.saveProfileApi(
+                            name = displayUser.name,
+                            headline = displayUser.headline,
+                            bio = displayUser.bio,
+                            work = displayUser.work,
+                            education = displayUser.education,
+                            location = displayUser.location,
+                            website = displayUser.website,
+                            avatarUrl = url,
+                            coverUrl = displayUser.coverImageUrl
+                        )
+                        user = user?.copy(profileImageUrl = url)
+                        shareToast = "Avatar updated!"
+                    } else {
+                        shareToast = viewModel.uploadError ?: "Avatar upload failed"
+                    }
+                    uploadingAvatar = false
+                }
+            }
+            "dialogCover" -> {
+                uploadingDialogCover = true
+                scope.launch {
+                    val url = viewModel.uploadImage(context, uri)
+                    if (url != null) pendingCoverUrl = url
+                    else shareToast = viewModel.uploadError ?: "Cover upload failed"
+                    uploadingDialogCover = false
+                }
+            }
+            "dialogAvatar" -> {
+                uploadingDialogAvatar = true
+                scope.launch {
+                    val url = viewModel.uploadImage(context, uri)
+                    if (url != null) pendingAvatarUrl = url
+                    else shareToast = viewModel.uploadError ?: "Avatar upload failed"
+                    uploadingDialogAvatar = false
+                }
+            }
+        }
+    }
+
     val handle = if (!displayUser.username.isNullOrBlank()) "@${displayUser.username}" else (displayUser.email?.substringBefore("@")?.let { "@$it" } ?: "@user")
     val avatar = if (!displayUser.profileImageUrl.isNullOrBlank()) displayUser.profileImageUrl!! else getDefaultAvatar(displayUser.name, displayUser.id)
     val isVerified = displayUser.isVerified == 1 || displayUser.isVerified == true || displayUser.isVerified == "1" || displayUser.isUserVerified || viewModel.isUserVerified(displayUser.id, displayUser)
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(PageDarkBg)
-    ) {
+    Box(modifier = Modifier.fillMaxSize().background(PageDarkBg)) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Main Scrollable Profile
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-            ) {
-                // FULL BLEED COVER (h-[220px] sm:h-[280px])
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                // COVER
                 item {
                     Box(
                         modifier = Modifier
@@ -401,7 +457,6 @@ fun UserProfilePage(
                             }
                         }
 
-                        // Gradient shadow at bottom: from-[#050B18] via-[#050B18]/60 to-transparent
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -414,7 +469,6 @@ fun UserProfilePage(
                                 )
                         )
 
-                        // Top Back Button
                         IconButton(
                             onClick = onClose,
                             modifier = Modifier
@@ -432,7 +486,6 @@ fun UserProfilePage(
                             )
                         }
 
-                        // Edit Cover Button (Owner only)
                         if (isOwnProfile) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -442,18 +495,22 @@ fun UserProfilePage(
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(Color.Black.copy(alpha = 0.6f))
                                     .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
-                                    .clickable { isEditing = true }
+                                    .clickable(enabled = !uploadingCover) {
+                                        pickTarget = "cover"
+                                        imagePicker.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                        )
+                                    }
                                     .padding(horizontal = 12.dp, vertical = 7.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.CameraAlt,
-                                    contentDescription = null,
-                                    tint = TextWhite,
-                                    modifier = Modifier.size(13.dp)
-                                )
+                                if (uploadingCover) {
+                                    CircularProgressIndicator(color = TextWhite, modifier = Modifier.size(13.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Default.CameraAlt, null, tint = TextWhite, modifier = Modifier.size(13.dp))
+                                }
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Edit cover",
+                                    text = if (uploadingCover) "Uploading…" else "Edit cover",
                                     color = TextWhite,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
@@ -463,30 +520,18 @@ fun UserProfilePage(
                     }
                 }
 
-                // AVATAR & INFO SECTION (-mt-[60px])
+                // AVATAR + INFO
                 item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                    ) {
-                        // Avatar Row with Overlap
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                         Row(
                             verticalAlignment = Alignment.Bottom,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .offset(y = (-50).dp)
+                            modifier = Modifier.fillMaxWidth().offset(y = (-50).dp)
                         ) {
-                            // Avatar with gradient border
                             Box(
                                 modifier = Modifier
                                     .size(96.dp)
                                     .clip(CircleShape)
-                                    .background(
-                                        Brush.linearGradient(
-                                            listOf(BrandBlue, BrandPurple, BrandPurpleEnd)
-                                        )
-                                    )
+                                    .background(Brush.linearGradient(listOf(BrandBlue, BrandPurple, BrandPurpleEnd)))
                                     .padding(3.dp)
                             ) {
                                 Box(
@@ -512,27 +557,26 @@ fun UserProfilePage(
                                             .clip(CircleShape)
                                             .background(DialogDarkBg)
                                             .border(2.dp, PageDarkBg, CircleShape)
-                                            .clickable { isEditing = true },
+                                            .clickable(enabled = !uploadingAvatar) {
+                                                pickTarget = "avatar"
+                                                imagePicker.launch(
+                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                                )
+                                            },
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.CameraAlt,
-                                            contentDescription = "Edit avatar",
-                                            tint = TextWhite,
-                                            modifier = Modifier.size(13.dp)
-                                        )
+                                        if (uploadingAvatar) {
+                                            CircularProgressIndicator(color = TextWhite, modifier = Modifier.size(11.dp), strokeWidth = 1.5.dp)
+                                        } else {
+                                            Icon(Icons.Default.CameraAlt, "Edit avatar", tint = TextWhite, modifier = Modifier.size(13.dp))
+                                        }
                                     }
                                 }
                             }
 
                             Spacer(modifier = Modifier.width(14.dp))
 
-                            // Name & Verified Badge & Handle
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(bottom = 6.dp)
-                            ) {
+                            Column(modifier = Modifier.weight(1f).padding(bottom = 6.dp)) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -545,22 +589,13 @@ fun UserProfilePage(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    if (isVerified) {
-                                        VerifiedBadge(size = 18.dp)
-                                    }
+                                    if (isVerified) VerifiedBadge(size = 18.dp)
                                 }
-                                Text(
-                                    text = handle,
-                                    color = TextGray500,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
+                                Text(text = handle, color = TextGray500, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                             }
                         }
 
-                        // Adjust content upwards to compensate for offset
                         Column(modifier = Modifier.offset(y = (-36).dp)) {
-                            // Headline
                             if (!displayUser.headline.isNullOrBlank()) {
                                 Text(
                                     text = displayUser.headline!!,
@@ -571,8 +606,6 @@ fun UserProfilePage(
                                     modifier = Modifier.padding(top = 2.dp)
                                 )
                             }
-
-                            // Bio
                             if (!displayUser.bio.isNullOrBlank()) {
                                 Text(
                                     text = displayUser.bio!!,
@@ -583,7 +616,6 @@ fun UserProfilePage(
                                 )
                             }
 
-                            // Work / Education / Location / Website tags
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -592,15 +624,9 @@ fun UserProfilePage(
                                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                if (!displayUser.work.isNullOrBlank()) {
-                                    InfoTag(icon = Icons.Default.Work, text = displayUser.work!!)
-                                }
-                                if (!displayUser.education.isNullOrBlank()) {
-                                    InfoTag(icon = Icons.Default.School, text = displayUser.education!!)
-                                }
-                                if (!displayUser.location.isNullOrBlank()) {
-                                    InfoTag(icon = Icons.Default.LocationOn, text = displayUser.location!!)
-                                }
+                                if (!displayUser.work.isNullOrBlank()) InfoTag(icon = Icons.Default.Work, text = displayUser.work!!)
+                                if (!displayUser.education.isNullOrBlank()) InfoTag(icon = Icons.Default.School, text = displayUser.education!!)
+                                if (!displayUser.location.isNullOrBlank()) InfoTag(icon = Icons.Default.LocationOn, text = displayUser.location!!)
                                 if (!displayUser.website.isNullOrBlank()) {
                                     val cleanUrl = displayUser.website!!.removePrefix("https://").removePrefix("http://")
                                     Row(
@@ -612,18 +638,15 @@ fun UserProfilePage(
                                             } catch (_: Exception) {}
                                         }
                                     ) {
-                                        Icon(imageVector = Icons.Default.Language, contentDescription = null, tint = BrandCyan, modifier = Modifier.size(13.dp))
+                                        Icon(Icons.Default.Language, null, tint = BrandCyan, modifier = Modifier.size(13.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text(text = cleanUrl, color = BrandCyan, fontSize = 12.5.sp, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
+                                        Text(cleanUrl, color = BrandCyan, fontSize = 12.5.sp)
                                     }
                                 }
                             }
 
-                            // Followers / Job Adverts / Stories Counts
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 14.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
                                 horizontalArrangement = Arrangement.spacedBy(18.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -632,85 +655,59 @@ fun UserProfilePage(
                                 CountItem(count = fmtCount(sortedStories.size), label = "stories")
                             }
 
-                            // Action Buttons Row
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 14.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 if (isOwnProfile) {
-                                    // Edit Profile Button
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.Center,
                                         modifier = Modifier
-                                            .weight(1f)
-                                            .height(40.dp)
-                                            .clip(RoundedCornerShape(12.dp))
+                                            .weight(1f).height(40.dp).clip(RoundedCornerShape(12.dp))
                                             .background(Color.White.copy(alpha = 0.04f))
                                             .border(1.dp, CardBorderColor, RoundedCornerShape(12.dp))
                                             .clickable { isEditing = true }
                                     ) {
-                                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, tint = TextWhite, modifier = Modifier.size(14.dp))
+                                        Icon(Icons.Default.Edit, null, tint = TextWhite, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text(text = "Edit Profile", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                        Text("Edit Profile", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                     }
 
-                                    // Post a Job Button
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.Center,
                                         modifier = Modifier
-                                            .weight(1f)
-                                            .height(40.dp)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(
-                                                Brush.horizontalGradient(listOf(BrandBlue, BrandPurple))
-                                            )
-                                            .clickable {
-                                                viewModel.openPostJob(NavRoute.USER_PROFILE)
-                                            }
+                                            .weight(1f).height(40.dp).clip(RoundedCornerShape(12.dp))
+                                            .background(Brush.horizontalGradient(listOf(BrandBlue, BrandPurple)))
+                                            .clickable { viewModel.openPostJob(NavRoute.USER_PROFILE) }
                                     ) {
-                                        Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = TextWhite, modifier = Modifier.size(15.dp))
+                                        Icon(Icons.Default.Add, null, tint = TextWhite, modifier = Modifier.size(15.dp))
                                         Spacer(modifier = Modifier.width(5.dp))
-                                        Text(text = "Post a Job", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                        Text("Post a Job", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                     }
 
-                                    // New Story Camera Button
                                     Box(
                                         modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(RoundedCornerShape(12.dp))
+                                            .size(40.dp).clip(RoundedCornerShape(12.dp))
                                             .background(Color.White.copy(alpha = 0.04f))
                                             .border(1.dp, CardBorderColor, RoundedCornerShape(12.dp))
                                             .clickable {
-                                                if (viewModel.userToken != null) {
-                                                    viewModel.isCreateStoryOpen = true
-                                                } else {
-                                                    viewModel.openAuth()
-                                                }
+                                                if (viewModel.userToken != null) viewModel.isCreateStoryOpen = true else viewModel.openAuth()
                                             },
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(imageVector = Icons.Default.CameraAlt, contentDescription = "New Story", tint = TextWhite, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.CameraAlt, "New Story", tint = TextWhite, modifier = Modifier.size(16.dp))
                                     }
                                 } else {
-                                    // Follow / Following Button
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.Center,
                                         modifier = Modifier
-                                            .weight(1f)
-                                            .height(40.dp)
-                                            .clip(RoundedCornerShape(12.dp))
+                                            .weight(1f).height(40.dp).clip(RoundedCornerShape(12.dp))
                                             .background(if (following) Color.White.copy(alpha = 0.04f) else BrandBlue)
-                                            .border(
-                                                1.dp,
-                                                if (following) CardBorderColor else Color.Transparent,
-                                                RoundedCornerShape(12.dp)
-                                            )
+                                            .border(1.dp, if (following) CardBorderColor else Color.Transparent, RoundedCornerShape(12.dp))
                                             .clickable(enabled = !followLoading) { handleFollow() }
                                     ) {
                                         if (followLoading) {
@@ -723,79 +720,56 @@ fun UserProfilePage(
                                                 modifier = Modifier.size(15.dp)
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = if (following) "Following" else "Follow",
-                                                color = TextWhite,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
+                                            Text(if (following) "Following" else "Follow", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                         }
                                     }
 
-                                    // Share Button
                                     Box(
                                         modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(RoundedCornerShape(12.dp))
+                                            .size(40.dp).clip(RoundedCornerShape(12.dp))
                                             .background(Color.White.copy(alpha = 0.04f))
                                             .border(1.dp, CardBorderColor, RoundedCornerShape(12.dp))
                                             .clickable { handleShareProfile() },
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(imageVector = Icons.Default.Share, contentDescription = "Share", tint = TextWhite, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.Share, "Share", tint = TextWhite, modifier = Modifier.size(16.dp))
                                     }
                                 }
                             }
 
-                            // MINI STORIES ROW (Top 5 stories)
                             if (topStories.isNotEmpty()) {
                                 Column(modifier = Modifier.padding(top = 18.dp)) {
                                     Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .horizontalScroll(rememberScrollState()),
+                                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
                                         topStories.forEach { s ->
                                             Column(
                                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                                modifier = Modifier
-                                                    .clickable { viewingStory = s }
-                                                    .width(64.dp)
+                                                modifier = Modifier.clickable { viewingStory = s }.width(64.dp)
                                             ) {
                                                 Box(
                                                     modifier = Modifier
-                                                        .size(64.dp)
-                                                        .clip(CircleShape)
-                                                        .background(
-                                                            Brush.linearGradient(
-                                                                listOf(BrandBlue, BrandPurple, BrandPurpleEnd)
-                                                            )
-                                                        )
+                                                        .size(64.dp).clip(CircleShape)
+                                                        .background(Brush.linearGradient(listOf(BrandBlue, BrandPurple, BrandPurpleEnd)))
                                                         .padding(2.5.dp)
                                                 ) {
                                                     Box(
                                                         modifier = Modifier
-                                                            .fillMaxSize()
-                                                            .clip(CircleShape)
+                                                            .fillMaxSize().clip(CircleShape)
                                                             .background(DialogDarkBg)
                                                             .border(3.dp, PageDarkBg, CircleShape)
                                                     ) {
                                                         if (s.type == "text" && s.mediaThumb.isNullOrBlank()) {
                                                             Box(
-                                                                modifier = Modifier
-                                                                    .fillMaxSize()
-                                                                    .background(Color(0xFF0F172A))
-                                                                    .padding(4.dp),
+                                                                modifier = Modifier.fillMaxSize().background(Color(0xFF0F172A)).padding(4.dp),
                                                                 contentAlignment = Alignment.Center
                                                             ) {
                                                                 Text(
                                                                     text = s.textContent?.take(12).orEmpty(),
-                                                                    color = Color.White,
-                                                                    fontSize = 8.sp,
+                                                                    color = Color.White, fontSize = 8.sp,
                                                                     fontWeight = FontWeight.Black,
-                                                                    textAlign = TextAlign.Center,
-                                                                    maxLines = 2
+                                                                    textAlign = TextAlign.Center, maxLines = 2
                                                                 )
                                                             }
                                                         } else {
@@ -808,13 +782,10 @@ fun UserProfilePage(
                                                         }
                                                     }
                                                 }
-
                                                 Text(
                                                     text = formatRelativeTime(s.createdAt),
-                                                    color = TextGray400,
-                                                    fontSize = 10.sp,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
+                                                    color = TextGray400, fontSize = 10.sp,
+                                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                                                     modifier = Modifier.padding(top = 4.dp)
                                                 )
                                             }
@@ -823,40 +794,17 @@ fun UserProfilePage(
                                 }
                             }
 
-                            // TABS HEADER (Jobs, Stories, About)
                             Row(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 18.dp)
+                                    .fillMaxWidth().padding(top = 18.dp)
                                     .border(1.dp, CardBorderColor, RoundedCornerShape(12.dp))
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(Color.White.copy(alpha = 0.02f)),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                ProfileTabButton(
-                                    title = "Job Adverts",
-                                    icon = Icons.Default.Work,
-                                    count = sortedJobs.size,
-                                    isSelected = activeTab == "jobs",
-                                    onClick = { activeTab = "jobs" },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                ProfileTabButton(
-                                    title = "Stories",
-                                    icon = Icons.Default.CameraAlt,
-                                    count = sortedStories.size,
-                                    isSelected = activeTab == "stories",
-                                    onClick = { activeTab = "stories" },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                ProfileTabButton(
-                                    title = "About",
-                                    icon = Icons.Default.Forum,
-                                    count = null,
-                                    isSelected = activeTab == "about",
-                                    onClick = { activeTab = "about" },
-                                    modifier = Modifier.weight(1f)
-                                )
+                                ProfileTabButton("Job Adverts", Icons.Default.Work, sortedJobs.size, activeTab == "jobs", { activeTab = "jobs" }, Modifier.weight(1f))
+                                ProfileTabButton("Stories", Icons.Default.CameraAlt, sortedStories.size, activeTab == "stories", { activeTab = "stories" }, Modifier.weight(1f))
+                                ProfileTabButton("About", Icons.Default.Forum, null, activeTab == "about", { activeTab = "about" }, Modifier.weight(1f))
                             }
                         }
                     }
@@ -868,18 +816,13 @@ fun UserProfilePage(
                         if (isOwnProfile) {
                             item {
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
                                         text = "YOUR JOB POSTINGS (${sortedJobs.size})",
-                                        color = TextGray400,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.sp
+                                        color = TextGray400, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp
                                     )
                                     Row(
                                         modifier = Modifier
@@ -889,7 +832,7 @@ fun UserProfilePage(
                                             .padding(horizontal = 12.dp, vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                        Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text("POST A JOB", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
@@ -916,20 +859,15 @@ fun UserProfilePage(
                                         viewModel.selectJob(job)
                                         viewModel.navigateTo(NavRoute.JOB_DETAIL)
                                     },
-                                    onEdit = {
-                                        viewModel.openEditJob(job, NavRoute.USER_PROFILE)
-                                    },
+                                    onEdit = { viewModel.openEditJob(job, NavRoute.USER_PROFILE) },
                                     onDelete = { jobToDelete = job }
                                 )
                             }
 
-                            // See More / Show Less Pagination
                             item {
                                 if (hasMoreJobs) {
                                     Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 12.dp),
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                                         horizontalArrangement = Arrangement.Center
                                     ) {
                                         Row(
@@ -941,30 +879,22 @@ fun UserProfilePage(
                                                 .clickable { jobsVisible += PROFILE_JOBS_PER_PAGE }
                                                 .padding(horizontal = 20.dp, vertical = 10.dp)
                                         ) {
-                                            Icon(imageVector = Icons.Default.KeyboardArrowDown, contentDescription = null, tint = TextWhite, modifier = Modifier.size(16.dp))
+                                            Icon(Icons.Default.KeyboardArrowDown, null, tint = TextWhite, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
                                                 text = "SEE MORE (${sortedJobs.size - jobsVisible} REMAINING)",
-                                                color = TextWhite,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = 1.sp
+                                                color = TextWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp
                                             )
                                         }
                                     }
                                 } else if (jobsVisible > PROFILE_JOBS_PER_PAGE) {
                                     Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 12.dp),
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                                         horizontalArrangement = Arrangement.Center
                                     ) {
                                         Text(
                                             text = "SHOW LESS",
-                                            color = TextGray500,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 1.sp,
+                                            color = TextGray500, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
                                             modifier = Modifier.clickable { jobsVisible = PROFILE_JOBS_PER_PAGE }
                                         )
                                     }
@@ -982,23 +912,16 @@ fun UserProfilePage(
                                     subtitle = if (isOwnProfile) "Share your first story — job wins, tips, updates" else "This user hasn't shared any stories yet",
                                     actionLabel = if (isOwnProfile) "Create Story" else null,
                                     onAction = {
-                                        if (viewModel.userToken != null) {
-                                            viewModel.isCreateStoryOpen = true
-                                        } else {
-                                            viewModel.openAuth()
-                                        }
+                                        if (viewModel.userToken != null) viewModel.isCreateStoryOpen = true else viewModel.openAuth()
                                     }
                                 )
                             }
                         } else {
                             item {
                                 Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                                     verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    // 2-column grid of stories
                                     val rows = visibleStories.chunked(2)
                                     rows.forEach { pair ->
                                         Row(
@@ -1007,24 +930,16 @@ fun UserProfilePage(
                                         ) {
                                             pair.forEach { s ->
                                                 Box(modifier = Modifier.weight(1f)) {
-                                                    NativeStoryCard(
-                                                        story = s,
-                                                        onClick = { viewingStory = s }
-                                                    )
+                                                    NativeStoryCard(story = s, onClick = { viewingStory = s })
                                                 }
                                             }
-                                            if (pair.size == 1) {
-                                                Spacer(modifier = Modifier.weight(1f))
-                                            }
+                                            if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
                                         }
                                     }
 
-                                    // See More / Show Less Pagination
                                     if (hasMoreStories) {
                                         Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 12.dp),
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                                             horizontalArrangement = Arrangement.Center
                                         ) {
                                             Row(
@@ -1036,30 +951,22 @@ fun UserProfilePage(
                                                     .clickable { storiesVisible += STORIES_PER_PAGE }
                                                     .padding(horizontal = 20.dp, vertical = 10.dp)
                                             ) {
-                                                Icon(imageVector = Icons.Default.KeyboardArrowDown, contentDescription = null, tint = TextWhite, modifier = Modifier.size(16.dp))
+                                                Icon(Icons.Default.KeyboardArrowDown, null, tint = TextWhite, modifier = Modifier.size(16.dp))
                                                 Spacer(modifier = Modifier.width(6.dp))
                                                 Text(
                                                     text = "SEE MORE (${sortedStories.size - storiesVisible} REMAINING)",
-                                                    color = TextWhite,
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    letterSpacing = 1.sp
+                                                    color = TextWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp
                                                 )
                                             }
                                         }
                                     } else if (storiesVisible > STORIES_PER_PAGE) {
                                         Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 12.dp),
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                                             horizontalArrangement = Arrangement.Center
                                         ) {
                                             Text(
                                                 text = "SHOW LESS",
-                                                color = TextGray500,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = 1.sp,
+                                                color = TextGray500, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
                                                 modifier = Modifier.clickable { storiesVisible = STORIES_PER_PAGE }
                                             )
                                         }
@@ -1072,85 +979,41 @@ fun UserProfilePage(
                     "about" -> {
                         item {
                             Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                AboutCard(
-                                    icon = Icons.Default.Forum,
-                                    title = "Bio",
-                                    value = displayUser.bio ?: if (isOwnProfile) "Add a short bio" else "No bio available",
-                                    isMuted = displayUser.bio.isNullOrBlank(),
-                                    onClick = if (isOwnProfile && displayUser.bio.isNullOrBlank()) { { isEditing = true } } else null
-                                )
-
-                                AboutCard(
-                                    icon = Icons.Default.Work,
-                                    title = "Work",
-                                    value = displayUser.work ?: if (isOwnProfile) "Add current company" else "Not specified",
-                                    isMuted = displayUser.work.isNullOrBlank(),
-                                    onClick = if (isOwnProfile && displayUser.work.isNullOrBlank()) { { isEditing = true } } else null
-                                )
-
-                                AboutCard(
-                                    icon = Icons.Default.School,
-                                    title = "Education",
-                                    value = displayUser.education ?: if (isOwnProfile) "Add education" else "Not specified",
-                                    isMuted = displayUser.education.isNullOrBlank(),
-                                    onClick = if (isOwnProfile && displayUser.education.isNullOrBlank()) { { isEditing = true } } else null
-                                )
-
-                                AboutCard(
-                                    icon = Icons.Default.LocationOn,
-                                    title = "Location",
-                                    value = displayUser.location ?: if (isOwnProfile) "Add location" else "Not specified",
-                                    isMuted = displayUser.location.isNullOrBlank(),
-                                    onClick = if (isOwnProfile && displayUser.location.isNullOrBlank()) { { isEditing = true } } else null
-                                )
-
+                                AboutCard(Icons.Default.Forum, "Bio", displayUser.bio ?: if (isOwnProfile) "Add a short bio" else "No bio available", displayUser.bio.isNullOrBlank(), onClick = if (isOwnProfile && displayUser.bio.isNullOrBlank()) { { isEditing = true } } else null)
+                                AboutCard(Icons.Default.Work, "Work", displayUser.work ?: if (isOwnProfile) "Add current company" else "Not specified", displayUser.work.isNullOrBlank(), onClick = if (isOwnProfile && displayUser.work.isNullOrBlank()) { { isEditing = true } } else null)
+                                AboutCard(Icons.Default.School, "Education", displayUser.education ?: if (isOwnProfile) "Add education" else "Not specified", displayUser.education.isNullOrBlank(), onClick = if (isOwnProfile && displayUser.education.isNullOrBlank()) { { isEditing = true } } else null)
+                                AboutCard(Icons.Default.LocationOn, "Location", displayUser.location ?: if (isOwnProfile) "Add location" else "Not specified", displayUser.location.isNullOrBlank(), onClick = if (isOwnProfile && displayUser.location.isNullOrBlank()) { { isEditing = true } } else null)
                                 if (!displayUser.website.isNullOrBlank()) {
-                                    AboutCard(
-                                        icon = Icons.Default.Language,
-                                        title = "Website",
-                                        value = displayUser.website!!,
-                                        isMuted = false,
-                                        link = displayUser.website!!
-                                    )
+                                    AboutCard(Icons.Default.Language, "Website", displayUser.website!!, false, link = displayUser.website!!)
                                 }
-
                                 AboutCard(
-                                    icon = Icons.Default.CalendarToday,
-                                    title = "Joined",
-                                    value = displayUser.createdAt?.let {
+                                    Icons.Default.CalendarToday, "Joined",
+                                    displayUser.createdAt?.let {
                                         try {
                                             val t = parseServerTime(it)
-                                            val sdf = java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.US)
-                                            sdf.format(java.util.Date(t))
+                                            java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.US).format(java.util.Date(t))
                                         } catch (_: Exception) { "October 2026" }
                                     } ?: "October 2026",
-                                    isMuted = false
+                                    false
                                 )
                             }
                         }
                     }
                 }
 
-                item {
-                    Spacer(modifier = Modifier.height(40.dp))
-                }
+                item { Spacer(modifier = Modifier.height(40.dp)) }
             }
         }
 
-        // FLOATING TOAST BANNER (CheckCircle in emerald)
+        // TOAST
         AnimatedVisibility(
             visible = shareToast != null,
             enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 16.dp)
+            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 16.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1160,49 +1023,54 @@ fun UserProfilePage(
                     .border(1.dp, EmeraldText.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
                     .padding(horizontal = 16.dp, vertical = 10.dp)
             ) {
-                Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldText, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.CheckCircle, null, tint = EmeraldText, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(text = shareToast.orEmpty(), color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(shareToast.orEmpty(), color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
         }
 
-        // EDIT PROFILE MODAL (Exact match with EditProfileModal in UserProfile.tsx)
-        if (isEditing && displayUser != null) {
+        // EDIT PROFILE DIALOG
+        if (isEditing) {
             EditProfileDialog(
                 user = displayUser,
-                onClose = { isEditing = false },
+                initialCoverUrl = pendingCoverUrl ?: displayUser.coverImageUrl,
+                initialAvatarUrl = pendingAvatarUrl ?: displayUser.profileImageUrl,
+                uploadingCover = uploadingDialogCover,
+                uploadingAvatar = uploadingDialogAvatar,
+                onPickCover = {
+                    pickTarget = "dialogCover"
+                    imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                onPickAvatar = {
+                    pickTarget = "dialogAvatar"
+                    imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                onClose = {
+                    isEditing = false
+                    pendingCoverUrl = null
+                    pendingAvatarUrl = null
+                },
                 onSave = { name, headline, bio, work, education, location, website, avatarUrl, coverUrl ->
                     scope.launch {
                         viewModel.saveProfileApi(
-                            name = name,
-                            headline = headline,
-                            bio = bio,
-                            work = work,
-                            education = education,
-                            location = location,
-                            website = website,
-                            avatarUrl = avatarUrl,
-                            coverUrl = coverUrl
+                            name = name, headline = headline, bio = bio, work = work,
+                            education = education, location = location, website = website,
+                            avatarUrl = avatarUrl, coverUrl = coverUrl
                         )
                         user = user?.copy(
-                            name = name,
-                            headline = headline,
-                            bio = bio,
-                            work = work,
-                            education = education,
-                            location = location,
-                            website = website,
-                            profileImageUrl = avatarUrl,
-                            coverImageUrl = coverUrl
+                            name = name, headline = headline, bio = bio, work = work,
+                            education = education, location = location, website = website,
+                            profileImageUrl = avatarUrl, coverImageUrl = coverUrl
                         )
                         isEditing = false
+                        pendingCoverUrl = null
+                        pendingAvatarUrl = null
                         shareToast = "Profile saved!"
                     }
                 }
             )
         }
 
-        // DELETE JOB MODAL
         if (jobToDelete != null) {
             DeleteJobDialog(
                 job = jobToDelete!!,
@@ -1211,44 +1079,26 @@ fun UserProfilePage(
             )
         }
 
-        // STORY VIEWER (When viewing story from profile)
         if (viewingStory != null) {
             val storyItem = viewingStory!!
-            val authorUser = displayUser
             StoryViewer(
                 story = storyItem,
-                user = authorUser,
+                user = displayUser,
                 currentUser = authUser,
                 isVerified = isVerified,
                 allStories = sortedStories,
                 onClose = { viewingStory = null },
                 onNext = {
                     val idx = sortedStories.indexOfFirst { it.id == storyItem.id }
-                    if (idx >= 0 && idx + 1 < sortedStories.size) {
-                        viewingStory = sortedStories[idx + 1]
-                    } else {
-                        viewingStory = null
-                    }
+                    if (idx >= 0 && idx + 1 < sortedStories.size) viewingStory = sortedStories[idx + 1] else viewingStory = null
                 },
                 onPrev = {
                     val idx = sortedStories.indexOfFirst { it.id == storyItem.id }
-                    if (idx > 0) {
-                        viewingStory = sortedStories[idx - 1]
-                    } else {
-                        viewingStory = null
-                    }
+                    if (idx > 0) viewingStory = sortedStories[idx - 1] else viewingStory = null
                 },
-                onDeleteStory = { sId ->
-                    handleDeleteStory(sId)
-                    viewingStory = null
-                },
-                onViewRecorded = { sId ->
-                    viewModel.recordStoryView(sId)
-                },
-                onProfileClick = { pUser ->
-                    viewingStory = null
-                    viewModel.openUserProfile(pUser)
-                }
+                onDeleteStory = { sId -> handleDeleteStory(sId); viewingStory = null },
+                onViewRecorded = { sId -> viewModel.recordStoryView(sId) },
+                onProfileClick = { pUser -> viewingStory = null; viewModel.openUserProfile(pUser) }
             )
         }
     }
@@ -1268,23 +1118,13 @@ private fun ProfileTabButton(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier
-            .clickable(onClick = onClick)
-            .padding(vertical = 12.dp)
+        modifier = modifier.clickable(onClick = onClick).padding(vertical = 12.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (isSelected) TextWhite else TextGray500,
-                modifier = Modifier.size(14.dp)
-            )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            Icon(icon, null, tint = if (isSelected) TextWhite else TextGray500, modifier = Modifier.size(14.dp))
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = title,
+                title,
                 color = if (isSelected) TextWhite else TextGray500,
                 fontSize = 13.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
@@ -1297,54 +1137,39 @@ private fun ProfileTabButton(
                         .background(if (isSelected) BrandBlue.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.05f))
                         .padding(horizontal = 6.dp, vertical = 1.dp)
                 ) {
-                    Text(
-                        text = "$count",
-                        color = if (isSelected) BrandCyan else TextGray500,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("$count", color = if (isSelected) BrandCyan else TextGray500, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
-
         Spacer(modifier = Modifier.height(4.dp))
         if (isSelected) {
-            Box(
-                modifier = Modifier
-                    .width(40.dp)
-                    .height(2.dp)
-                    .clip(RoundedCornerShape(1.dp))
-                    .background(Brush.horizontalGradient(listOf(BrandBlue, BrandPurpleEnd)))
-            )
+            Box(Modifier.width(40.dp).height(2.dp).clip(RoundedCornerShape(1.dp)).background(Brush.horizontalGradient(listOf(BrandBlue, BrandPurpleEnd))))
         } else {
             Spacer(modifier = Modifier.height(2.dp))
         }
     }
 }
 
-// ============================================================
-// METADATA CHIP / INFO TAG
-// ============================================================
 @Composable
 private fun InfoTag(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(imageVector = icon, contentDescription = null, tint = TextGray500, modifier = Modifier.size(12.dp))
+        Icon(icon, null, tint = TextGray500, modifier = Modifier.size(12.dp))
         Spacer(modifier = Modifier.width(4.dp))
-        Text(text = text, color = TextGray400, fontSize = 12.5.sp)
+        Text(text, color = TextGray400, fontSize = 12.5.sp)
     }
 }
 
 @Composable
 private fun CountItem(count: String, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(text = count, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text(count, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.width(4.dp))
-        Text(text = label, color = TextGray500, fontSize = 13.sp)
+        Text(label, color = TextGray500, fontSize = 13.sp)
     }
 }
 
 // ============================================================
-// NATIVE JOB CARD (Exact match with JobCard in UserProfile.tsx)
+// NATIVE JOB CARD
 // ============================================================
 @Composable
 private fun NativeJobCard(
@@ -1366,15 +1191,10 @@ private fun NativeJobCard(
             .clickable(onClick = onSelect)
             .padding(14.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Top
-        ) {
-            // Company Logo / Initial Fallback
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .size(44.dp).clip(RoundedCornerShape(12.dp))
                     .background(Color.White.copy(alpha = 0.03f))
                     .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
@@ -1387,12 +1207,7 @@ private fun NativeJobCard(
                         modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
                     )
                 } else {
-                    Text(
-                        text = job.company.take(1).uppercase().ifBlank { "?" },
-                        color = TextGray400,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text(job.company.take(1).uppercase().ifBlank { "?" }, color = TextGray400, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -1406,74 +1221,41 @@ private fun NativeJobCard(
                             .background(BrandBlue.copy(alpha = 0.15f))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
-                        Text(
-                            text = job.role!!.uppercase(),
-                            color = BrandCyan,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        )
+                        Text(job.role!!.uppercase(), color = BrandCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                 }
 
-                Text(
-                    text = job.title,
-                    color = TextWhite,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Text(job.title, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(imageVector = Icons.Default.Work, contentDescription = null, tint = TextGray500, modifier = Modifier.size(10.dp))
+                        Icon(Icons.Default.Work, null, tint = TextGray500, modifier = Modifier.size(10.dp))
                         Spacer(modifier = Modifier.width(3.dp))
-                        Text(text = job.company, color = TextGray500, fontSize = 11.sp, maxLines = 1)
+                        Text(job.company, color = TextGray500, fontSize = 11.sp, maxLines = 1)
                     }
-
                     if (!job.location.isNullOrBlank()) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(imageVector = Icons.Default.LocationOn, contentDescription = null, tint = TextGray500, modifier = Modifier.size(10.dp))
+                            Icon(Icons.Default.LocationOn, null, tint = TextGray500, modifier = Modifier.size(10.dp))
                             Spacer(modifier = Modifier.width(3.dp))
-                            Text(text = job.location!!, color = TextGray500, fontSize = 11.sp, maxLines = 1)
+                            Text(job.location!!, color = TextGray500, fontSize = 11.sp, maxLines = 1)
                         }
                     }
                 }
 
                 if (!job.salary.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = job.salary!!,
-                        color = EmeraldText,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text(job.salary!!, color = EmeraldText, fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                 }
             }
 
-            // 3-dots Menu for Owner / Admin
             if (canManage) {
                 Box {
-                    IconButton(
-                        onClick = { menuOpen = true },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Options",
-                            tint = TextGray400,
-                            modifier = Modifier.size(16.dp)
-                        )
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.MoreVert, "Options", tint = TextGray400, modifier = Modifier.size(16.dp))
                     }
-
                     DropdownMenu(
                         expanded = menuOpen,
                         onDismissRequest = { menuOpen = false },
@@ -1482,28 +1264,22 @@ private fun NativeJobCard(
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(imageVector = Icons.Default.Edit, contentDescription = null, tint = BrandCyan, modifier = Modifier.size(14.dp))
+                                    Icon(Icons.Default.Edit, null, tint = BrandCyan, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Edit Job", color = TextWhite, fontSize = 12.sp)
                                 }
                             },
-                            onClick = {
-                                menuOpen = false
-                                onEdit()
-                            }
+                            onClick = { menuOpen = false; onEdit() }
                         )
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(imageVector = Icons.Default.Delete, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
+                                    Icon(Icons.Default.Delete, null, tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Delete Job", color = Color(0xFFF87171), fontSize = 12.sp)
                                 }
                             },
-                            onClick = {
-                                menuOpen = false
-                                onDelete()
-                            }
+                            onClick = { menuOpen = false; onDelete() }
                         )
                     }
                 }
@@ -1513,13 +1289,10 @@ private fun NativeJobCard(
 }
 
 // ============================================================
-// NATIVE STORY CARD (9:16 Aspect Ratio from UserProfile.tsx)
+// NATIVE STORY CARD
 // ============================================================
 @Composable
-private fun NativeStoryCard(
-    story: StoryType,
-    onClick: () -> Unit
-) {
+private fun NativeStoryCard(story: StoryType, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1533,64 +1306,37 @@ private fun NativeStoryCard(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFF0F172A), Color(0xFF1E293B))
-                        )
-                    )
+                    .background(Brush.linearGradient(listOf(Color(0xFF0F172A), Color(0xFF1E293B))))
                     .padding(12.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = story.textContent.orEmpty(),
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    maxLines = 6,
-                    overflow = TextOverflow.Ellipsis
+                    color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center, maxLines = 6, overflow = TextOverflow.Ellipsis
                 )
             }
         } else if (!story.mediaThumb.isNullOrBlank() || !story.mediaUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = story.mediaThumb ?: story.mediaUrl,
-                contentDescription = "Story",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
+            AsyncImage(story.mediaThumb ?: story.mediaUrl, "Story", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         } else {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Brush.linearGradient(listOf(BrandBlue, BrandPurple))),
+                modifier = Modifier.fillMaxSize().background(Brush.linearGradient(listOf(BrandBlue, BrandPurple))),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(imageVector = Icons.Default.Image, contentDescription = null, tint = TextWhite, modifier = Modifier.size(28.dp))
+                Icon(Icons.Default.Image, null, tint = TextWhite, modifier = Modifier.size(28.dp))
             }
         }
-
-        // Bottom Gradient Overlay with Eye + Views + Relative Time
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
-                    )
-                )
+                .fillMaxWidth().align(Alignment.BottomCenter)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
                 .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(imageVector = Icons.Default.Visibility, contentDescription = null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Icon(Icons.Default.Visibility, null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(10.dp))
                 Text(
-                    text = "${fmtCount(story.viewsCount ?: 0)} · ${formatRelativeTime(story.createdAt)}",
-                    color = Color.White.copy(alpha = 0.8f),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium
+                    "${fmtCount(story.viewsCount ?: 0)} · ${formatRelativeTime(story.createdAt)}",
+                    color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp, fontWeight = FontWeight.Medium
                 )
             }
         }
@@ -1598,7 +1344,7 @@ private fun NativeStoryCard(
 }
 
 // ============================================================
-// ABOUT CARD (Matching UserProfile.tsx About tab)
+// ABOUT CARD
 // ============================================================
 @Composable
 private fun AboutCard(
@@ -1617,9 +1363,8 @@ private fun AboutCard(
             .background(Color.White.copy(alpha = 0.02f))
             .border(1.dp, CardBorderColor, RoundedCornerShape(16.dp))
             .clickable(enabled = onClick != null || link != null) {
-                if (onClick != null) {
-                    onClick()
-                } else if (link != null) {
+                if (onClick != null) onClick()
+                else if (link != null) {
                     try {
                         val uri = if (link.startsWith("http")) Uri.parse(link) else Uri.parse("https://$link")
                         context.startActivity(Intent(Intent.ACTION_VIEW, uri))
@@ -1630,38 +1375,20 @@ private fun AboutCard(
         verticalAlignment = Alignment.Top
     ) {
         Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color.White.copy(alpha = 0.04f)),
+            modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.04f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(imageVector = icon, contentDescription = null, tint = TextGray400, modifier = Modifier.size(16.dp))
+            Icon(icon, null, tint = TextGray400, modifier = Modifier.size(16.dp))
         }
-
         Spacer(modifier = Modifier.width(12.dp))
-
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title.uppercase(),
-                color = TextGray500,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
+            Text(title.uppercase(), color = TextGray500, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             Spacer(modifier = Modifier.height(2.dp))
             if (link != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = value,
-                        color = BrandCyan,
-                        fontSize = 13.sp,
-                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Text(value, color = BrandCyan, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(modifier = Modifier.width(4.dp))
-                    Icon(imageVector = Icons.Default.OpenInNew, contentDescription = null, tint = BrandCyan, modifier = Modifier.size(11.dp))
+                    Icon(Icons.Default.OpenInNew, null, tint = BrandCyan, modifier = Modifier.size(11.dp))
                 }
             } else {
                 Text(
@@ -1677,7 +1404,7 @@ private fun AboutCard(
 }
 
 // ============================================================
-// EMPTY STATE COMPONENT (Exact UserProfile.tsx EmptyState)
+// EMPTY STATE
 // ============================================================
 @Composable
 private fun EmptyState(
@@ -1698,30 +1425,19 @@ private fun EmptyState(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
-            modifier = Modifier
-                .size(56.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.04f)),
+            modifier = Modifier.size(56.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.04f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(imageVector = icon, contentDescription = null, tint = TextGray500, modifier = Modifier.size(26.dp))
+            Icon(icon, null, tint = TextGray500, modifier = Modifier.size(26.dp))
         }
-
         Spacer(modifier = Modifier.height(12.dp))
-
-        Text(text = title, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-
+        Text(title, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(4.dp))
-
         Text(
-            text = subtitle,
-            color = TextGray500,
-            fontSize = 12.sp,
-            textAlign = TextAlign.Center,
-            lineHeight = 16.sp,
+            text = subtitle, color = TextGray500, fontSize = 12.sp,
+            textAlign = TextAlign.Center, lineHeight = 16.sp,
             modifier = Modifier.widthIn(max = 280.dp)
         )
-
         if (actionLabel != null && onAction != null) {
             Spacer(modifier = Modifier.height(14.dp))
             Row(
@@ -1732,20 +1448,26 @@ private fun EmptyState(
                     .clickable(onClick = onAction)
                     .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = TextWhite, modifier = Modifier.size(13.dp))
+                Icon(Icons.Default.Add, null, tint = TextWhite, modifier = Modifier.size(13.dp))
                 Spacer(modifier = Modifier.width(5.dp))
-                Text(text = actionLabel, color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(actionLabel, color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
 }
 
 // ============================================================
-// EDIT PROFILE DIALOG (Exact fields & modal from UserProfile.tsx)
+// EDIT PROFILE DIALOG — with cover/avatar upload buttons
 // ============================================================
 @Composable
 private fun EditProfileDialog(
     user: StoryUser,
+    initialCoverUrl: String?,
+    initialAvatarUrl: String?,
+    uploadingCover: Boolean,
+    uploadingAvatar: Boolean,
+    onPickCover: () -> Unit,
+    onPickAvatar: () -> Unit,
     onClose: () -> Unit,
     onSave: (name: String, headline: String?, bio: String?, work: String?, education: String?, location: String?, website: String?, avatarUrl: String?, coverUrl: String?) -> Unit
 ) {
@@ -1756,8 +1478,8 @@ private fun EditProfileDialog(
     var education by remember { mutableStateOf(user.education.orEmpty()) }
     var location by remember { mutableStateOf(user.location.orEmpty()) }
     var website by remember { mutableStateOf(user.website.orEmpty()) }
-    var avatarUrl by remember { mutableStateOf(user.profileImageUrl.orEmpty()) }
-    var coverUrl by remember { mutableStateOf(user.coverImageUrl.orEmpty()) }
+    var avatarUrl by remember(initialAvatarUrl) { mutableStateOf(initialAvatarUrl.orEmpty()) }
+    var coverUrl by remember(initialCoverUrl) { mutableStateOf(initialCoverUrl.orEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
 
     Dialog(onDismissRequest = onClose) {
@@ -1765,125 +1487,115 @@ private fun EditProfileDialog(
             shape = RoundedCornerShape(24.dp),
             color = DialogDarkBg,
             border = androidx.compose.foundation.BorderStroke(1.dp, CardBorderColor),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
+            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-            ) {
-                // Header
+            Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = "Edit Profile", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("Edit Profile", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     IconButton(
                         onClick = onClose,
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.05f))
+                        modifier = Modifier.size(32.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.05f))
                     ) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = TextGray400, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Close, "Close", tint = TextGray400, modifier = Modifier.size(16.dp))
                     }
                 }
 
-                // Cover Preview & Change Cover Field
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(100.dp)
-                        .background(
-                            Brush.linearGradient(
-                                listOf(
-                                    BrandBlue.copy(alpha = 0.3f),
-                                    BrandPurple.copy(alpha = 0.2f),
-                                    BrandPurpleEnd.copy(alpha = 0.3f)
-                                )
+                        .fillMaxWidth().height(100.dp)
+                        .background(Brush.linearGradient(
+                            listOf(
+                                BrandBlue.copy(alpha = 0.3f),
+                                BrandPurple.copy(alpha = 0.2f),
+                                BrandPurpleEnd.copy(alpha = 0.3f)
                             )
-                        )
+                        ))
                 ) {
                     if (coverUrl.isNotBlank()) {
-                        AsyncImage(model = coverUrl, contentDescription = "Cover", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        AsyncImage(coverUrl, "Cover", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                     }
                 }
 
-                // Avatar Preview
                 Box(
                     modifier = Modifier
-                        .padding(start = 20.dp)
-                        .offset(y = (-30).dp)
-                        .size(68.dp)
-                        .clip(CircleShape)
-                        .background(DialogDarkBg)
+                        .padding(start = 20.dp).offset(y = (-30).dp).size(68.dp)
+                        .clip(CircleShape).background(DialogDarkBg)
                         .border(3.dp, DialogDarkBg, CircleShape)
                 ) {
                     AsyncImage(
-                        model = avatarUrl.ifBlank { getDefaultAvatar(name, user.id) },
-                        contentDescription = "Avatar",
+                        avatarUrl.ifBlank { getDefaultAvatar(name, user.id) },
+                        "Avatar",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize().clip(CircleShape)
                     )
                 }
 
-                // Form Fields
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .offset(y = (-16).dp)
-                        .padding(horizontal = 20.dp),
+                    modifier = Modifier.fillMaxWidth().offset(y = (-16).dp).padding(horizontal = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    EditField(label = "NAME", value = name, onValueChange = { name = it }, placeholder = "Your name", isRequired = true)
-                    EditField(label = "HEADLINE", value = headline, onValueChange = { headline = it }, placeholder = "e.g. Software Engineer • Nairobi")
-                    EditField(label = "BIO", value = bio, onValueChange = { bio = it }, placeholder = "Short bio", isTextArea = true)
-                    EditField(label = "WORK", value = work, onValueChange = { work = it }, placeholder = "Current company", icon = Icons.Default.Work)
-                    EditField(label = "EDUCATION", value = education, onValueChange = { education = it }, placeholder = "School or university", icon = Icons.Default.School)
-                    EditField(label = "LOCATION", value = location, onValueChange = { location = it }, placeholder = "City, Country", icon = Icons.Default.LocationOn)
-                    EditField(label = "WEBSITE", value = website, onValueChange = { website = it }, placeholder = "https://...", icon = Icons.Default.Language)
-                    EditField(label = "AVATAR IMAGE URL", value = avatarUrl, onValueChange = { avatarUrl = it }, placeholder = "https://images.unsplash.com/...")
-                    EditField(label = "COVER IMAGE URL", value = coverUrl, onValueChange = { coverUrl = it }, placeholder = "https://images.unsplash.com/...")
-
-                    if (error != null) {
-                        Text(text = error!!, color = Color(0xFFF87171), fontSize = 12.sp)
+                    // Change cover / Change avatar buttons
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f).height(36.dp).clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .clickable(enabled = !uploadingCover, onClick = onPickCover),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            if (uploadingCover) CircularProgressIndicator(color = TextWhite, modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                            else Icon(Icons.Default.CameraAlt, null, tint = TextWhite, modifier = Modifier.size(12.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (uploadingCover) "Uploading…" else "Change cover", color = TextWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Row(
+                            modifier = Modifier
+                                .weight(1f).height(36.dp).clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .clickable(enabled = !uploadingAvatar, onClick = onPickAvatar),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            if (uploadingAvatar) CircularProgressIndicator(color = TextWhite, modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                            else Icon(Icons.Default.CameraAlt, null, tint = TextWhite, modifier = Modifier.size(12.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (uploadingAvatar) "Uploading…" else "Change avatar", color = TextWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
 
-                    // Action Buttons
+                    EditField("NAME", name, { name = it }, "Your name", isRequired = true)
+                    EditField("HEADLINE", headline, { headline = it }, "e.g. Software Engineer • Nairobi")
+                    EditField("BIO", bio, { bio = it }, "Short bio", isTextArea = true)
+                    EditField("WORK", work, { work = it }, "Current company", icon = Icons.Default.Work)
+                    EditField("EDUCATION", education, { education = it }, "School or university", icon = Icons.Default.School)
+                    EditField("LOCATION", location, { location = it }, "City, Country", icon = Icons.Default.LocationOn)
+                    EditField("WEBSITE", website, { website = it }, "https://...", icon = Icons.Default.Language)
+                    EditField("AVATAR IMAGE URL", avatarUrl, { avatarUrl = it }, "https://...")
+                    EditField("COVER IMAGE URL", coverUrl, { coverUrl = it }, "https://...")
+
+                    if (error != null) Text(error!!, color = Color(0xFFF87171), fontSize = 12.sp)
+
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 10.dp, bottom = 10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color.White.copy(alpha = 0.05f))
-                                .clickable(onClick = onClose),
+                                .weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.05f)).clickable(onClick = onClose),
                             contentAlignment = Alignment.Center
-                        ) {
-                            Text("Cancel", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
+                        ) { Text("Cancel", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
 
                         Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(BrandBlue)
-                                .clickable {
-                                    if (name.isBlank()) {
-                                        error = "Name is required"
-                                        return@clickable
-                                    }
+                                .weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp))
+                                .background(BrandBlue).clickable {
+                                    if (name.isBlank()) { error = "Name is required"; return@clickable }
                                     onSave(
                                         name.trim(),
                                         headline.trim().ifBlank { null },
@@ -1897,9 +1609,7 @@ private fun EditProfileDialog(
                                     )
                                 },
                             contentAlignment = Alignment.Center
-                        ) {
-                            Text("Save", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
+                        ) { Text("Save", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
                     }
                 }
             }
@@ -1920,21 +1630,12 @@ private fun EditField(
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) {
-                Icon(imageVector = icon, contentDescription = null, tint = TextGray400, modifier = Modifier.size(11.dp))
+                Icon(icon, null, tint = TextGray400, modifier = Modifier.size(11.dp))
                 Spacer(modifier = Modifier.width(4.dp))
             }
-            Text(
-                text = label,
-                color = TextGray400,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
-            if (isRequired) {
-                Text(text = " *", color = Color(0xFFEF4444), fontSize = 10.sp)
-            }
+            Text(label, color = TextGray400, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            if (isRequired) Text(" *", color = Color(0xFFEF4444), fontSize = 10.sp)
         }
-
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
@@ -1956,52 +1657,36 @@ private fun EditField(
 }
 
 // ============================================================
-// DELETE JOB DIALOG (Matching DeleteJobModal in UserProfile.tsx)
+// DELETE JOB DIALOG
 // ============================================================
 @Composable
-private fun DeleteJobDialog(
-    job: JobOpportunity,
-    onCancel: () -> Unit,
-    onConfirm: () -> Unit
-) {
+private fun DeleteJobDialog(job: JobOpportunity, onCancel: () -> Unit, onConfirm: () -> Unit) {
     Dialog(onDismissRequest = onCancel) {
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = DialogDarkBg,
             border = androidx.compose.foundation.BorderStroke(1.dp, CardBorderColor),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+            modifier = Modifier.fillMaxWidth().padding(16.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
+                            .size(40.dp).clip(CircleShape)
                             .background(Color(0xFFEF4444).copy(alpha = 0.15f))
                             .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.3f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Warning, null, tint = Color(0xFFF87171), modifier = Modifier.size(20.dp))
                     }
-
                     Column {
                         Text("Delete this job?", color = TextWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         Text("This action cannot be undone.", color = TextGray500, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
                     }
                 }
-
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .fillMaxWidth().clip(RoundedCornerShape(12.dp))
                         .background(Color.White.copy(alpha = 0.02f))
                         .border(1.dp, CardBorderColor, RoundedCornerShape(12.dp))
                         .padding(12.dp)
@@ -2012,34 +1697,21 @@ private fun DeleteJobDialog(
                         Text(job.company, color = TextGray500, fontSize = 11.sp)
                     }
                 }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.White.copy(alpha = 0.05f))
-                            .clickable(onClick = onCancel),
+                            .weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp))
+                            .background(Color.White.copy(alpha = 0.05f)).clickable(onClick = onCancel),
                         contentAlignment = Alignment.Center
-                    ) {
-                        Text("Cancel", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
-
+                    ) { Text("Cancel", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFDC2626))
-                            .clickable(onClick = onConfirm),
+                            .weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFFDC2626)).clickable(onClick = onConfirm),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(imageVector = Icons.Default.Delete, contentDescription = null, tint = TextWhite, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Delete, null, tint = TextWhite, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Delete", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
