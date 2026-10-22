@@ -178,18 +178,13 @@ fun IntelligenceFeedScreen(viewModel: AppViewModel) {
             }
         }
 
-        // --- Community Job Stories Reel (Sync with JobsReport Web) ---
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(BgCard)
-                .border(1.dp, BorderWhite10, RoundedCornerShape(20.dp))
-        ) {
+        // --- Community Stories (flat Facebook-style rail, no card) ---
+        Column(modifier = Modifier.fillMaxWidth()) {
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -204,8 +199,8 @@ fun IntelligenceFeedScreen(viewModel: AppViewModel) {
                             .background(EmeraldGreen)
                     )
                     Text(
-                        text = "COMMUNITY STORIES",
-                        color = Color.White,
+                        text = "STORIES",
+                        color = TextPrimary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
@@ -215,17 +210,12 @@ fun IntelligenceFeedScreen(viewModel: AppViewModel) {
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Quick "+ Create Story" button on Home Screen
+                    // Create Story — plain text, no pill
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(Color(0xFF1877F2), Color(0xFF0055FF))
-                                )
-                            )
+                            .clip(RoundedCornerShape(8.dp))
                             .clickable {
                                 if (viewModel.userToken != null) {
                                     viewModel.isCreateStoryOpen = true
@@ -233,31 +223,30 @@ fun IntelligenceFeedScreen(viewModel: AppViewModel) {
                                     viewModel.openAuth()
                                 }
                             }
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = "Create Story",
-                            tint = Color.White,
+                            tint = LightBlue,
                             modifier = Modifier.size(13.dp)
                         )
                         Text(
                             text = "Create Story",
-                            color = Color.White,
+                            color = LightBlue,
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
 
-                    // View All link
+                    // View All
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.White.copy(alpha = 0.05f))
+                            .clip(RoundedCornerShape(8.dp))
                             .clickable { viewModel.navigateTo(NavRoute.STORIES) }
-                            .padding(horizontal = 9.dp, vertical = 5.dp),
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
@@ -276,6 +265,8 @@ fun IntelligenceFeedScreen(viewModel: AppViewModel) {
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             com.example.ui.screens.StoryReel(
                 stories = viewModel.stories,
@@ -300,42 +291,9 @@ fun IntelligenceFeedScreen(viewModel: AppViewModel) {
                 },
                 onRequestLogin = {
                     viewModel.openAuth()
-                }
+                },
+                flat = true
             )
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(EmeraldGreen)
-                    )
-                    Text(
-                        text = "Stories disappear in 7 days",
-                        color = TextMuted,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-
-                Text(
-                    text = "${viewModel.stories.count { !com.example.data.isStoryExpired(it) }} active",
-                    color = LightBlue,
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
         }
 
         // --- 2. Hero Section ---
@@ -1139,4 +1097,3 @@ private fun JobCardItem(
         }
     }
 }
-
