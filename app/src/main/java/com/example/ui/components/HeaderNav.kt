@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import coil.compose.AsyncImage
@@ -184,7 +185,39 @@ fun HeaderNav(
                 }
             }
 
-            // 4. User Account / Profile / Sign In Button (Auth icon)
+            // 4. Notifications Bell Button
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (viewModel.currentRoute == NavRoute.NOTIFICATIONS) PrimaryBlue.copy(alpha = 0.2f) else BgCard)
+                    .border(
+                        1.dp,
+                        if (viewModel.currentRoute == NavRoute.NOTIFICATIONS) PrimaryBlue.copy(alpha = 0.5f) else BorderWhite10,
+                        RoundedCornerShape(8.dp)
+                    )
+                    .clickable { viewModel.openNotifications() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Notifications,
+                    contentDescription = "Notifications",
+                    tint = if (viewModel.currentRoute == NavRoute.NOTIFICATIONS || viewModel.unreadNotificationsCount > 0) LightBlue else TextPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+                if (viewModel.unreadNotificationsCount > 0) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(2.dp)
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(LightBlue)
+                    )
+                }
+            }
+
+            // 5. User Account / Profile / Sign In Button (Auth icon)
             Box(
                 modifier = Modifier
                     .size(36.dp)

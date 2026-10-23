@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Login
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Work
@@ -151,6 +152,18 @@ fun MobileNavDrawer(
                     isSelected = viewModel.currentRoute == NavRoute.SAVED_JOBS,
                     badgeCount = viewModel.savedJobsCount,
                     onClick = { viewModel.navigateTo(NavRoute.SAVED_JOBS) }
+                )
+
+                NavItemRow(
+                    title = "Notifications",
+                    icon = Icons.Default.Notifications,
+                    iconColor = LightBlue,
+                    isSelected = viewModel.currentRoute == NavRoute.NOTIFICATIONS,
+                    badgeCount = viewModel.unreadNotificationsCount,
+                    onClick = {
+                        viewModel.isMobileMenuOpen = false
+                        viewModel.openNotifications()
+                    }
                 )
 
                 NavItemRow(

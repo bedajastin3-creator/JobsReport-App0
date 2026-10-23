@@ -99,6 +99,10 @@ fun JobsReportLayout(viewModel: AppViewModel) {
                                 }
                             }
                         )
+                        NavRoute.NOTIFICATIONS -> com.example.ui.screens.NotificationScreen(
+                            viewModel = viewModel,
+                            onClose = { viewModel.navigateTo(NavRoute.INTELLIGENCE_FEED) }
+                        )
                     }
                 }
             }

@@ -156,6 +156,25 @@ interface JobsReportApi {
         @Body payload: RequestBody
     ): ResponseBody
 
+    @GET("api/notifications")
+    suspend fun getNotifications(
+        @Header("Authorization") auth: String?,
+        @Query("limit") limit: Int = 30,
+        @Query("offset") offset: Int = 0
+    ): ResponseBody
+
+    @POST("api/notifications")
+    suspend fun updateNotifications(
+        @Header("Authorization") auth: String?,
+        @Body payload: RequestBody
+    ): ResponseBody
+
+    @DELETE("api/notifications")
+    suspend fun deleteNotification(
+        @Header("Authorization") auth: String?,
+        @Query("id") id: String
+    ): ResponseBody
+
     companion object {
         private const val BASE_URL = "https://jobsreport.online/"
 

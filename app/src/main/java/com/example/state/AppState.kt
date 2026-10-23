@@ -2,6 +2,8 @@ package com.example.state
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
+import com.example.util.ImageCompressor
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -33,6 +35,11 @@ import com.example.data.UploadResponse
 import com.example.data.getDefaultStoryAvatar
 import com.example.data.isStoryExpired
 import com.example.data.isUserVerified
+import com.example.data.AppNotification
+import com.example.data.NotificationActor
+import com.example.data.getDefaultNotificationAvatar
+import com.example.data.formatNotificationRelativeTime
+import com.example.data.parseNotificationTimeMs
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -63,7 +70,8 @@ enum class NavRoute(val title: String, val routePath: String) {
     STORIES("Job Stories", "/stories"),
     USER_AUTH("Account / Sign In", "/auth"),
     USER_PROFILE("User Profile", "/profile"),
-    USER_JOB_INPUT("Post a Job", "/post-job")
+    USER_JOB_INPUT("Post a Job", "/post-job"),
+    NOTIFICATIONS("Notifications", "/notifications")
 }
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
@@ -525,17 +533,211 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var isSearchModalOpen by mutableStateOf(false)
     var searchQuery by mutableStateOf("")
 
-    // Notifications
+    // Notifications State (Live Backend Sync)
+    var notificationsList by mutableStateOf<List<AppNotification>>(emptyList())
+    var unreadNotificationsCount by mutableStateOf(0)
+    var totalNotificationsCount by mutableStateOf(0)
+    var hasMoreNotifications by mutableStateOf(false)
+    var isNotificationsLoading by mutableStateOf(false)
+    var isNotificationsLoadingMore by mutableStateOf(false)
+    var isMarkingAllNotifications by mutableStateOf(false)
+    var notificationToastMessage by mutableStateOf<String?>(null)
+    var notificationToastIsError by mutableStateOf(false)
+
+    val unreadCount: Int
+        get() = unreadNotificationsCount
+
+    // Backward-compatible mock notifications list
     val notifications = mutableStateListOf<NotificationItem>().apply {
         addAll(sampleNotifications)
     }
 
-    val unreadCount: Int
-        get() = notifications.count { it.isUnread }
+    fun loadNotifications(offset: Int = 0) {
+        val token = userToken
+        if (token.isNullOrBlank()) {
+            isNotificationsLoading = false
+            isNotificationsLoadingMore = false
+            return
+        }
+
+        if (offset == 0) {
+            isNotificationsLoading = true
+        } else {
+            isNotificationsLoadingMore = true
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val response = api.getNotifications(
+                    auth = "Bearer $token",
+                    limit = 30,
+                    offset = offset
+                )
+                val rawJson = response.string()
+                val json = if (rawJson.isNotBlank()) JSONObject(rawJson) else JSONObject()
+                val list = mutableListOf<AppNotification>()
+                val arr = json.optJSONArray("notifications") ?: JSONArray()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val actorObj = obj.optJSONObject("actor")
+                    val actor = if (actorObj != null) {
+                        NotificationActor(
+                            id = actorObj.optString("id").takeIf { it.isNotBlank() },
+                            name = actorObj.optString("name").takeIf { it.isNotBlank() },
+                            username = actorObj.optString("username").takeIf { it.isNotBlank() },
+                            profileImageUrl = actorObj.optString("profileImageUrl").takeIf { it.isNotBlank() }
+                        )
+                    } else null
+
+                    list.add(
+                        AppNotification(
+                            id = obj.optString("id", "${System.currentTimeMillis()}_$i"),
+                            type = obj.optString("type", "job_created"),
+                            title = obj.optString("title", ""),
+                            body = obj.optString("body").takeIf { it.isNotBlank() },
+                            link = obj.optString("link").takeIf { it.isNotBlank() },
+                            imageUrl = obj.optString("imageUrl").takeIf { it.isNotBlank() },
+                            actorId = obj.optString("actorId").takeIf { it.isNotBlank() },
+                            actor = actor,
+                            entityType = obj.optString("entityType").takeIf { it.isNotBlank() },
+                            entityId = obj.optString("entityId").takeIf { it.isNotBlank() },
+                            isRead = obj.optBoolean("isRead", false) || obj.optInt("isRead", 0) == 1,
+                            createdAt = obj.optString("createdAt", "")
+                        )
+                    )
+                }
+                val unread = json.optInt("unread", 0)
+                val total = json.optInt("total", list.size)
+                val hasMore = json.optBoolean("hasMore", false)
+
+                withContext(Dispatchers.Main) {
+                    if (offset == 0) {
+                        notificationsList = list
+                    } else {
+                        val existingIds = notificationsList.map { it.id }.toSet()
+                        val newItems = list.filter { it.id !in existingIds }
+                        notificationsList = notificationsList + newItems
+                    }
+                    unreadNotificationsCount = unread
+                    totalNotificationsCount = total
+                    hasMoreNotifications = hasMore
+                }
+            } catch (e: Exception) {
+                // Ignore network errors gracefully
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isNotificationsLoading = false
+                    isNotificationsLoadingMore = false
+                }
+            }
+        }
+    }
 
     fun markAllNotificationsRead() {
-        for (i in notifications.indices) {
-            notifications[i] = notifications[i].copy(isUnread = false)
+        if (isMarkingAllNotifications || unreadNotificationsCount == 0) return
+        val token = userToken ?: return
+
+        isMarkingAllNotifications = true
+        val snapshot = notificationsList
+        notificationsList = notificationsList.map { it.copy(isRead = true) }
+        unreadNotificationsCount = 0
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    put("all", true)
+                }.toString().toRequestBody("application/json".toMediaTypeOrNull())
+
+                api.updateNotifications("Bearer $token", payload)
+                withContext(Dispatchers.Main) {
+                    notificationToastMessage = "All marked as read"
+                    notificationToastIsError = false
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    notificationsList = snapshot
+                    unreadNotificationsCount = snapshot.count { !it.isRead }
+                    notificationToastMessage = "Failed to mark all as read"
+                    notificationToastIsError = true
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isMarkingAllNotifications = false
+                }
+            }
+        }
+    }
+
+    fun markNotificationRead(id: String, read: Boolean) {
+        val prevItem = notificationsList.find { it.id == id }
+        notificationsList = notificationsList.map { if (it.id == id) it.copy(isRead = read) else it }
+        if (prevItem != null && prevItem.isRead != read) {
+            unreadNotificationsCount = if (read) maxOf(0, unreadNotificationsCount - 1) else unreadNotificationsCount + 1
+        }
+
+        val token = userToken ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    put("ids", JSONArray().put(id))
+                }.toString().toRequestBody("application/json".toMediaTypeOrNull())
+
+                api.updateNotifications("Bearer $token", payload)
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun deleteNotification(id: String) {
+        val snapshot = notificationsList
+        val item = notificationsList.find { it.id == id }
+        notificationsList = notificationsList.filter { it.id != id }
+        if (item != null && !item.isRead) {
+            unreadNotificationsCount = maxOf(0, unreadNotificationsCount - 1)
+        }
+
+        val token = userToken ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                api.deleteNotification("Bearer $token", id)
+                withContext(Dispatchers.Main) {
+                    notificationToastMessage = "Removed"
+                    notificationToastIsError = false
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    notificationsList = snapshot
+                    unreadNotificationsCount = snapshot.count { !it.isRead }
+                    notificationToastMessage = "Failed to remove notification"
+                    notificationToastIsError = true
+                }
+            }
+        }
+    }
+
+    fun handleNotificationClick(notification: AppNotification) {
+        if (!notification.isRead) {
+            markNotificationRead(notification.id, true)
+        }
+        val rawLink = notification.link?.trim() ?: ""
+        if (rawLink.isNotBlank()) {
+            when {
+                rawLink.contains("/stories") -> navigateTo(NavRoute.STORIES)
+                rawLink.contains("/jobs") || rawLink.contains("/careerredirect") -> {
+                    navigateTo(NavRoute.ALL_JOBS)
+                }
+                rawLink.contains("/profile") || rawLink.contains("/u/") -> {
+                    openUserProfile(null)
+                }
+                rawLink.contains("/reports") -> navigateTo(NavRoute.JOB_REPORTS)
+                else -> navigateTo(NavRoute.INTELLIGENCE_FEED)
+            }
+        }
+    }
+
+    fun openNotifications() {
+        navigateTo(NavRoute.NOTIFICATIONS)
+        if (userToken != null) {
+            loadNotifications(0)
         }
     }
 
@@ -610,6 +812,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
+            loadNotifications(0)
         } else {
             currentUser = null
         }
@@ -676,6 +879,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (!token.isNullOrBlank()) {
             userToken = token.trim()
             prefs.edit().putString("jobsreport_token", token.trim()).apply()
+            loadNotifications(0)
         }
         val isVerifiedInt = if (updated.isUserVerified) 1 else 0
         prefs.edit()
@@ -896,6 +1100,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun logout() {
         isAdmin = false
         userToken = null
+        notificationsList = emptyList()
+        unreadNotificationsCount = 0
         val randomId = "usr_" + java.util.UUID.randomUUID().toString().take(8)
         val defaultName = "Job Seeker"
         val avatar = getDefaultStoryAvatar(defaultName, randomId)
@@ -1232,6 +1438,56 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
         }
+    }
+
+    var uploadError by mutableStateOf<String?>(null)
+
+    suspend fun uploadImage(context: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
+        uploadError = null
+        try {
+            // 1. Compress (ImageCompressor validates image/*, caps 8MB, scales 1600px, JPEG q85→40, ≤500KB)
+            val compressed = ImageCompressor.processImageUri(context, uri).getOrThrow()
+
+            // 2. Build multipart parts (field names match /api/upload)
+            val filePart = MultipartBody.Part.createFormData(
+                "file",
+                compressed.mainFileName,
+                compressed.mainBytes.toRequestBody(compressed.mainMime.toMediaTypeOrNull())
+            )
+            val namePart = MultipartBody.Part.createFormData("name", compressed.mainFileName)
+            val altPart = MultipartBody.Part.createFormData("altText", "")
+
+            // 3. Upload via existing Retrofit method
+            val auth = userToken?.let { "Bearer $it" }
+            val resp = api.uploadMedia(auth, filePart, null, namePart, altPart)
+
+            // 4. Parse { url }
+            val rawStr = resp.string()
+            val json = JSONObject(rawStr)
+            val url = json.optString("url", json.optString("dataUrl", ""))
+            if (url.isBlank()) throw IllegalStateException("Upload failed")
+            url
+        } catch (e: Exception) {
+            uploadError = e.message ?: "Upload failed"
+            null
+        }
+    }
+
+    suspend fun updateProfileImage(context: Context, uri: Uri, field: String): String? {
+        val url = uploadImage(context, uri) ?: return null
+        val u = currentUser ?: return null
+        saveProfileApi(
+            name = u.name,
+            headline = u.headline,
+            bio = u.bio,
+            work = u.work,
+            education = u.education,
+            location = u.location,
+            website = u.website,
+            avatarUrl = if (field == "avatar") url else u.profileImageUrl,
+            coverUrl = if (field == "cover") url else u.coverImageUrl
+        )
+        return url
     }
 
     suspend fun fetchAllCompaniesCatalog(): List<Company> = withContext(Dispatchers.IO) {
