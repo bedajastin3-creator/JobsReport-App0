@@ -76,6 +76,12 @@ interface JobsReportApi {
         @Body payload: CreateStoryPayload
     ): ResponseBody
 
+    @POST("api/stories")
+    suspend fun createStoryRaw(
+        @Header("Authorization") auth: String?,
+        @Body payload: RequestBody
+    ): ResponseBody
+
     @DELETE("api/stories/{id}")
     suspend fun deleteStory(
         @Header("Authorization") auth: String?,

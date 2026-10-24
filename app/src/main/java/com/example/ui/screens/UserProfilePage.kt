@@ -351,7 +351,7 @@ fun UserProfilePage(
                 scope.launch {
                     val url = viewModel.uploadImage(context, uri)
                     if (url != null) {
-                        viewModel.saveProfileApi(
+                        val ok = viewModel.saveProfileApi(
                             name = displayUser.name,
                             headline = displayUser.headline,
                             bio = displayUser.bio,
@@ -362,8 +362,16 @@ fun UserProfilePage(
                             avatarUrl = displayUser.profileImageUrl,
                             coverUrl = url
                         )
-                        user = user?.copy(coverImageUrl = url)
-                        shareToast = "Cover updated!"
+                        if (ok) {
+                            val updated = viewModel.currentUser ?: user?.copy(coverImageUrl = url)
+                            user = updated
+                            if (viewModel.viewingProfileUser?.id == updated?.id) {
+                                viewModel.viewingProfileUser = updated
+                            }
+                            shareToast = "Cover updated!"
+                        } else {
+                            shareToast = "Failed to save cover to database"
+                        }
                     } else {
                         shareToast = viewModel.uploadError ?: "Cover upload failed"
                     }
@@ -375,7 +383,7 @@ fun UserProfilePage(
                 scope.launch {
                     val url = viewModel.uploadImage(context, uri)
                     if (url != null) {
-                        viewModel.saveProfileApi(
+                        val ok = viewModel.saveProfileApi(
                             name = displayUser.name,
                             headline = displayUser.headline,
                             bio = displayUser.bio,
@@ -386,8 +394,16 @@ fun UserProfilePage(
                             avatarUrl = url,
                             coverUrl = displayUser.coverImageUrl
                         )
-                        user = user?.copy(profileImageUrl = url)
-                        shareToast = "Avatar updated!"
+                        if (ok) {
+                            val updated = viewModel.currentUser ?: user?.copy(profileImageUrl = url)
+                            user = updated
+                            if (viewModel.viewingProfileUser?.id == updated?.id) {
+                                viewModel.viewingProfileUser = updated
+                            }
+                            shareToast = "Avatar updated!"
+                        } else {
+                            shareToast = "Failed to save avatar to database"
+                        }
                     } else {
                         shareToast = viewModel.uploadError ?: "Avatar upload failed"
                     }
@@ -496,10 +512,15 @@ fun UserProfilePage(
                                     .background(Color.Black.copy(alpha = 0.6f))
                                     .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
                                     .clickable(enabled = !uploadingCover) {
-                                        pickTarget = "cover"
-                                        imagePicker.launch(
-                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                        )
+                                        if (viewModel.userToken.isNullOrBlank()) {
+                                            viewModel.openAuth()
+                                            shareToast = "Please sign in first"
+                                        } else {
+                                            pickTarget = "cover"
+                                            imagePicker.launch(
+                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                            )
+                                        }
                                     }
                                     .padding(horizontal = 12.dp, vertical = 7.dp)
                             ) {
@@ -558,10 +579,15 @@ fun UserProfilePage(
                                             .background(DialogDarkBg)
                                             .border(2.dp, PageDarkBg, CircleShape)
                                             .clickable(enabled = !uploadingAvatar) {
-                                                pickTarget = "avatar"
-                                                imagePicker.launch(
-                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                                )
+                                                if (viewModel.userToken.isNullOrBlank()) {
+                                                    viewModel.openAuth()
+                                                    shareToast = "Please sign in first"
+                                                } else {
+                                                    pickTarget = "avatar"
+                                                    imagePicker.launch(
+                                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                                    )
+                                                }
                                             },
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -668,7 +694,14 @@ fun UserProfilePage(
                                             .weight(1f).height(40.dp).clip(RoundedCornerShape(12.dp))
                                             .background(Color.White.copy(alpha = 0.04f))
                                             .border(1.dp, CardBorderColor, RoundedCornerShape(12.dp))
-                                            .clickable { isEditing = true }
+                                            .clickable {
+                                                if (viewModel.userToken.isNullOrBlank()) {
+                                                    viewModel.openAuth()
+                                                    shareToast = "Please sign in first"
+                                                } else {
+                                                    isEditing = true
+                                                }
+                                            }
                                     ) {
                                         Icon(Icons.Default.Edit, null, tint = TextWhite, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
@@ -982,10 +1015,10 @@ fun UserProfilePage(
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                AboutCard(Icons.Default.Forum, "Bio", displayUser.bio ?: if (isOwnProfile) "Add a short bio" else "No bio available", displayUser.bio.isNullOrBlank(), onClick = if (isOwnProfile && displayUser.bio.isNullOrBlank()) { { isEditing = true } } else null)
-                                AboutCard(Icons.Default.Work, "Work", displayUser.work ?: if (isOwnProfile) "Add current company" else "Not specified", displayUser.work.isNullOrBlank(), onClick = if (isOwnProfile && displayUser.work.isNullOrBlank()) { { isEditing = true } } else null)
-                                AboutCard(Icons.Default.School, "Education", displayUser.education ?: if (isOwnProfile) "Add education" else "Not specified", displayUser.education.isNullOrBlank(), onClick = if (isOwnProfile && displayUser.education.isNullOrBlank()) { { isEditing = true } } else null)
-                                AboutCard(Icons.Default.LocationOn, "Location", displayUser.location ?: if (isOwnProfile) "Add location" else "Not specified", displayUser.location.isNullOrBlank(), onClick = if (isOwnProfile && displayUser.location.isNullOrBlank()) { { isEditing = true } } else null)
+                                AboutCard(Icons.Default.Forum, "Bio", displayUser.bio ?: if (isOwnProfile) "Add a short bio" else "No bio available", displayUser.bio.isNullOrBlank(), onClick = if (isOwnProfile && displayUser.bio.isNullOrBlank()) { { if (viewModel.userToken.isNullOrBlank()) { viewModel.openAuth(); shareToast = "Please sign in first" } else isEditing = true } } else null)
+                                AboutCard(Icons.Default.Work, "Work", displayUser.work ?: if (isOwnProfile) "Add current company" else "Not specified", displayUser.work.isNullOrBlank(), onClick = if (isOwnProfile && displayUser.work.isNullOrBlank()) { { if (viewModel.userToken.isNullOrBlank()) { viewModel.openAuth(); shareToast = "Please sign in first" } else isEditing = true } } else null)
+                                AboutCard(Icons.Default.School, "Education", displayUser.education ?: if (isOwnProfile) "Add education" else "Not specified", displayUser.education.isNullOrBlank(), onClick = if (isOwnProfile && displayUser.education.isNullOrBlank()) { { if (viewModel.userToken.isNullOrBlank()) { viewModel.openAuth(); shareToast = "Please sign in first" } else isEditing = true } } else null)
+                                AboutCard(Icons.Default.LocationOn, "Location", displayUser.location ?: if (isOwnProfile) "Add location" else "Not specified", displayUser.location.isNullOrBlank(), onClick = if (isOwnProfile && displayUser.location.isNullOrBlank()) { { if (viewModel.userToken.isNullOrBlank()) { viewModel.openAuth(); shareToast = "Please sign in first" } else isEditing = true } } else null)
                                 if (!displayUser.website.isNullOrBlank()) {
                                     AboutCard(Icons.Default.Language, "Website", displayUser.website!!, false, link = displayUser.website!!)
                                 }
@@ -1038,12 +1071,22 @@ fun UserProfilePage(
                 uploadingCover = uploadingDialogCover,
                 uploadingAvatar = uploadingDialogAvatar,
                 onPickCover = {
-                    pickTarget = "dialogCover"
-                    imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    if (viewModel.userToken.isNullOrBlank()) {
+                        viewModel.openAuth()
+                        shareToast = "Please sign in first"
+                    } else {
+                        pickTarget = "dialogCover"
+                        imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
                 },
                 onPickAvatar = {
-                    pickTarget = "dialogAvatar"
-                    imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    if (viewModel.userToken.isNullOrBlank()) {
+                        viewModel.openAuth()
+                        shareToast = "Please sign in first"
+                    } else {
+                        pickTarget = "dialogAvatar"
+                        imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
                 },
                 onClose = {
                     isEditing = false
@@ -1051,21 +1094,34 @@ fun UserProfilePage(
                     pendingAvatarUrl = null
                 },
                 onSave = { name, headline, bio, work, education, location, website, avatarUrl, coverUrl ->
+                    if (viewModel.userToken.isNullOrBlank()) {
+                        viewModel.openAuth()
+                        shareToast = "Please sign in to save profile"
+                        return@EditProfileDialog
+                    }
                     scope.launch {
-                        viewModel.saveProfileApi(
+                        val ok = viewModel.saveProfileApi(
                             name = name, headline = headline, bio = bio, work = work,
                             education = education, location = location, website = website,
                             avatarUrl = avatarUrl, coverUrl = coverUrl
                         )
-                        user = user?.copy(
-                            name = name, headline = headline, bio = bio, work = work,
-                            education = education, location = location, website = website,
-                            profileImageUrl = avatarUrl, coverImageUrl = coverUrl
-                        )
-                        isEditing = false
-                        pendingCoverUrl = null
-                        pendingAvatarUrl = null
-                        shareToast = "Profile saved!"
+                        if (ok) {
+                            val updated = viewModel.currentUser ?: user?.copy(
+                                name = name, headline = headline, bio = bio, work = work,
+                                education = education, location = location, website = website,
+                                profileImageUrl = avatarUrl, coverImageUrl = coverUrl
+                            )
+                            user = updated
+                            if (viewModel.viewingProfileUser?.id == updated?.id) {
+                                viewModel.viewingProfileUser = updated
+                            }
+                            isEditing = false
+                            pendingCoverUrl = null
+                            pendingAvatarUrl = null
+                            shareToast = "Profile saved!"
+                        } else {
+                            shareToast = "Failed to save profile to database"
+                        }
                     }
                 }
             )

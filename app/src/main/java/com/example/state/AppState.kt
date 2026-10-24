@@ -764,9 +764,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // ============================================================
     // USER AUTH & SESSION (jobsreport_token sync)
     // ============================================================
+    private fun extractUserIdFromToken(token: String?): String? {
+        if (token.isNullOrBlank()) return null
+        return try {
+            val parts = token.split(".")
+            if (parts.size >= 2) {
+                val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING), Charsets.UTF_8)
+                val json = JSONObject(payload)
+                json.optString("sub").takeIf { it.isNotBlank() } ?: json.optString("id").takeIf { it.isNotBlank() }
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun loadCurrentUser() {
         userToken = prefs.getString("jobsreport_token", null)
-        val savedId = prefs.getString("user_id", null)
+        var savedId = prefs.getString("user_id", null)
+        val extractedId = extractUserIdFromToken(userToken)
+        if (!extractedId.isNullOrBlank() && (savedId.isNullOrBlank() || savedId.startsWith("usr_"))) {
+            savedId = extractedId
+            prefs.edit().putString("user_id", extractedId).apply()
+        }
         val savedName = prefs.getString("user_name", null)
         val savedUsername = prefs.getString("user_username", null)
         val savedAvatar = prefs.getString("user_avatar", null)
@@ -809,6 +828,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (liveUser != null) {
                     withContext(Dispatchers.Main) {
                         currentUser = liveUser
+                        prefs.edit()
+                            .putString("user_id", liveUser.id)
+                            .putString("user_name", liveUser.name)
+                            .putString("user_username", liveUser.username)
+                            .putString("user_avatar", liveUser.profileImageUrl)
+                            .putString("user_cover", liveUser.coverImageUrl)
+                            .putString("user_email", liveUser.email)
+                            .putString("user_headline", liveUser.headline)
+                            .putString("user_location", liveUser.location)
+                            .putString("user_bio", liveUser.bio)
+                            .putString("user_work", liveUser.work)
+                            .putString("user_education", liveUser.education)
+                            .putString("user_website", liveUser.website)
+                            .putInt("user_is_verified", if (liveUser.isUserVerified) 1 else 0)
+                            .apply()
                     }
                 }
             }
@@ -837,13 +871,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         jobsCount: Int? = null,
         storiesCount: Int? = null,
         jobAdvertsCount: Int? = null,
-        joinedDate: String? = null
+        joinedDate: String? = null,
+        id: String? = null
     ) {
         val current = currentUser
-        val id = current?.id ?: ("usr_" + java.util.UUID.randomUUID().toString().take(8))
+        val tokenResolved = token?.trim()?.takeIf { it.isNotBlank() } ?: userToken
+        val idFromToken = extractUserIdFromToken(tokenResolved)
+        val resolvedId = id?.takeIf { it.isNotBlank() && !it.startsWith("usr_") }
+            ?: idFromToken
+            ?: current?.id?.takeIf { !it.startsWith("usr_") }
+            ?: id?.takeIf { it.isNotBlank() }
+            ?: current?.id
+            ?: ("usr_" + java.util.UUID.randomUUID().toString().take(8))
+
         val resolvedAvatar = avatarUrl?.ifBlank { null }
             ?: current?.profileImageUrl
-            ?: getDefaultStoryAvatar(name, id)
+            ?: getDefaultStoryAvatar(name, resolvedId)
         val resolvedCover = coverUrl?.ifBlank { null } ?: current?.coverImageUrl
         val resolvedHeadline = headline?.ifBlank { null } ?: current?.headline
         val resolvedLocation = location?.ifBlank { null } ?: current?.location
@@ -854,7 +897,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val resolvedVerified = isVerified ?: current?.isVerified
 
         val updated = StoryUser(
-            id = id,
+            id = resolvedId,
             name = name.ifBlank { "User" },
             username = username?.ifBlank { null } ?: current?.username,
             email = email?.ifBlank { null } ?: current?.email,
@@ -883,7 +926,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         val isVerifiedInt = if (updated.isUserVerified) 1 else 0
         prefs.edit()
-            .putString("user_id", id)
+            .putString("user_id", resolvedId)
             .putString("user_name", updated.name)
             .putString("user_username", updated.username)
             .putString("user_avatar", resolvedAvatar)
@@ -1030,8 +1073,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         avatarUrl: String?,
         coverUrl: String?
     ): Boolean = withContext(Dispatchers.IO) {
+        val token = userToken
+        if (token.isNullOrBlank()) {
+            return@withContext false
+        }
+        val auth = "Bearer $token"
+
         try {
-            val auth = userToken?.let { "Bearer $it" }
             val json = JSONObject().apply {
                 put("name", name)
                 put("headline", headline ?: JSONObject.NULL)
@@ -1044,36 +1092,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 put("cover_image_url", coverUrl ?: JSONObject.NULL)
             }
             val body = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
-            runCatching { api.updateProfile(auth, body) }
+            val responseBody = api.updateProfile(auth, body)
+            val jsonStr = responseBody.string()
+            val respJson = JSONObject(jsonStr)
+            val userObj = respJson.optJSONObject("user")
+
+            val serverId = userObj?.optString("id") ?: currentUser?.id ?: extractUserIdFromToken(token)
+
             withContext(Dispatchers.Main) {
                 updateCurrentUser(
-                    name = name,
-                    headline = headline,
-                    location = location,
-                    bio = bio,
-                    website = website,
-                    avatarUrl = avatarUrl,
-                    coverUrl = coverUrl,
-                    work = work,
-                    education = education
+                    id = serverId,
+                    name = userObj?.optString("name", name) ?: name,
+                    username = userObj?.optString("username", currentUser?.username) ?: currentUser?.username,
+                    headline = userObj?.optString("headline", headline ?: "") ?: headline,
+                    location = userObj?.optString("location", location ?: "") ?: location,
+                    bio = userObj?.optString("bio", bio ?: "") ?: bio,
+                    website = userObj?.optString("website", website ?: "") ?: website,
+                    avatarUrl = userObj?.optString("profile_image_url", avatarUrl ?: "") ?: avatarUrl,
+                    coverUrl = userObj?.optString("cover_image_url", coverUrl ?: "") ?: coverUrl,
+                    work = userObj?.optString("work", work ?: "") ?: work,
+                    education = userObj?.optString("education", education ?: "") ?: education
                 )
             }
             true
-        } catch (_: Exception) {
-            withContext(Dispatchers.Main) {
-                updateCurrentUser(
-                    name = name,
-                    headline = headline,
-                    location = location,
-                    bio = bio,
-                    website = website,
-                    avatarUrl = avatarUrl,
-                    coverUrl = coverUrl,
-                    work = work,
-                    education = education
-                )
-            }
-            true
+        } catch (e: Exception) {
+            android.util.Log.e("AppState", "saveProfileApi failed", e)
+            false
         }
     }
 
@@ -1147,11 +1191,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val username = userObj?.optString("username") ?: email.substringBefore("@")
                     val avatar = userObj?.optString("profileImageUrl", userObj?.optString("avatar", null))
                         ?: getDefaultStoryAvatar(name, username)
-                    val userId = userObj?.optString("id", "").orEmpty()
+                    val userId = userObj?.optString("id", "")?.takeIf { it.isNotBlank() }
+                        ?: extractUserIdFromToken(token)
+                        ?: ""
                     val isVerifiedVal = userObj?.opt("is_verified") ?: userObj?.opt("isVerified")
 
                     withContext(Dispatchers.Main) {
                         updateCurrentUser(
+                            id = userId,
                             name = name,
                             username = username,
                             email = email,
@@ -1161,7 +1208,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         if (userId.isNotBlank()) {
                             viewModelScope.launch {
-                                fetchUserProfile(userId)
+                                val live = fetchUserProfile(userId)
+                                if (live != null) {
+                                    withContext(Dispatchers.Main) {
+                                        currentUser = live
+                                    }
+                                }
                             }
                         }
                     }
@@ -1207,12 +1259,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     ?: (username?.trim() ?: email.substringBefore("@"))
                 val avatar = userObj?.optString("profileImageUrl", userObj?.optString("avatar", null))
                     ?: getDefaultStoryAvatar(resolvedName, resolvedUsername)
-                val userId = userObj?.optString("id", "").orEmpty()
+                val userId = userObj?.optString("id", "")?.takeIf { it.isNotBlank() }
+                    ?: extractUserIdFromToken(token)
+                    ?: ""
                 val isVerifiedVal = userObj?.opt("is_verified") ?: userObj?.opt("isVerified")
 
                 if (token.isNotBlank()) {
                     withContext(Dispatchers.Main) {
                         updateCurrentUser(
+                            id = userId,
                             name = resolvedName,
                             username = resolvedUsername,
                             email = email.trim(),
@@ -1224,7 +1279,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         if (userId.isNotBlank()) {
                             viewModelScope.launch {
-                                fetchUserProfile(userId)
+                                val live = fetchUserProfile(userId)
+                                if (live != null) {
+                                    withContext(Dispatchers.Main) {
+                                        currentUser = live
+                                    }
+                                }
                             }
                         }
                     }
@@ -1264,7 +1324,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         if (!parsed.isNullOrEmpty()) {
                             val active = parsed.filter { !isStoryExpired(it) }
                             withContext(Dispatchers.Main) {
-                                stories = active
+                                val serverStoryIds = active.map { it.id }.toSet()
+                                val currentUid = currentUser?.id
+                                val recentOwnStories = stories.filter {
+                                    (currentUid != null && it.userId == currentUid) &&
+                                    it.id !in serverStoryIds &&
+                                    !isStoryExpired(it)
+                                }
+                                stories = recentOwnStories + active
                                 active.forEach { s ->
                                     if (s.user != null) {
                                         userProfilesCache[s.userId] = s.user
@@ -1290,18 +1357,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             }
                         } else {
                             withContext(Dispatchers.Main) {
-                                stories = emptyList()
+                                val currentUid = currentUser?.id
+                                val recentOwnStories = stories.filter {
+                                    (currentUid != null && it.userId == currentUid) && !isStoryExpired(it)
+                                }
+                                stories = recentOwnStories
                             }
                         }
                     } else {
                         withContext(Dispatchers.Main) {
-                            stories = emptyList()
+                            val currentUid = currentUser?.id
+                            val recentOwnStories = stories.filter {
+                                (currentUid != null && it.userId == currentUid) && !isStoryExpired(it)
+                            }
+                            stories = recentOwnStories
                         }
                     }
                 }
             } catch (_: Exception) {
                 withContext(Dispatchers.Main) {
-                    stories = emptyList()
+                    val currentUid = currentUser?.id
+                    val recentOwnStories = stories.filter {
+                        (currentUid != null && it.userId == currentUid) && !isStoryExpired(it)
+                    }
+                    stories = recentOwnStories
                 }
             } finally {
                 isStoriesLoading = false
@@ -1379,12 +1458,57 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
             // Sync with backend API
             try {
-                api.createStory(authHeader, payload)
-                loadStories()
-            } catch (_: Exception) {
-                // Keep local story if remote is offline or preview
+                val json = JSONObject().apply {
+                    put("type", payload.type)
+                    put("expires_at", payload.expiresAt)
+                    if (!payload.textContent.isNullOrBlank()) {
+                        put("text_content", payload.textContent.trim())
+                    }
+                    if (!payload.backgroundStyle.isNullOrBlank()) {
+                        put("background_style", payload.backgroundStyle.trim())
+                    }
+                    if (!payload.mediaUrl.isNullOrBlank()) {
+                        put("media_url", payload.mediaUrl.trim())
+                    }
+                    if (!payload.mediaThumb.isNullOrBlank()) {
+                        put("media_thumb", payload.mediaThumb.trim())
+                    }
+                }
+                val body = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
+
+                val responseBody = api.createStoryRaw(authHeader, body)
+                val jsonStr = responseBody.string()
+                val respObj = JSONObject(jsonStr)
+
+                val storyObj = respObj.optJSONObject("story")
+                if (storyObj != null) {
+                    val serverStory = StoryType(
+                        id = storyObj.optString("id"),
+                        userId = storyObj.optString("user_id", userObj.id),
+                        slug = storyObj.optString("slug", ""),
+                        type = storyObj.optString("type", payload.type),
+                        textContent = storyObj.optString("text_content").takeIf { it.isNotBlank() } ?: payload.textContent,
+                        backgroundStyle = storyObj.optString("background_style").takeIf { it.isNotBlank() } ?: payload.backgroundStyle,
+                        mediaUrl = storyObj.optString("media_url").takeIf { it.isNotBlank() } ?: payload.mediaUrl,
+                        mediaThumb = storyObj.optString("media_thumb").takeIf { it.isNotBlank() } ?: payload.mediaThumb,
+                        createdAt = storyObj.optString("created_at", nowIso),
+                        expiresAt = storyObj.optString("expires_at", payload.expiresAt),
+                        isActive = storyObj.opt("is_active") ?: 1,
+                        viewsCount = storyObj.optInt("views_count", 0),
+                        user = userObj
+                    )
+                    withContext(Dispatchers.Main) {
+                        stories = listOf(serverStory) + stories.filter { it.id != localStory.id && it.id != serverStory.id }
+                        currentUser = currentUser?.copy(
+                            storiesCount = (currentUser?.storiesCount ?: 0) + 1
+                        )
+                    }
+                }
+                Unit
+            } catch (e: Exception) {
+                android.util.Log.e("AppState", "createStory remote failed", e)
+                throw e
             }
-            Unit
         }
     }
 
