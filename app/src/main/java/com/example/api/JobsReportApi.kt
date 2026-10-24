@@ -101,8 +101,14 @@ interface JobsReportApi {
     @POST("api/auth/login")
     suspend fun login(@Body payload: LoginPayload): ResponseBody
 
+    @POST("api/auth/login")
+    suspend fun loginRaw(@Body payload: RequestBody): ResponseBody
+
     @POST("api/auth/register")
     suspend fun register(@Body payload: RegisterPayload): ResponseBody
+
+    @POST("api/auth/register")
+    suspend fun registerRaw(@Body payload: RequestBody): ResponseBody
 
     @POST("api/auth/forgot-password")
     suspend fun forgotPassword(@Body payload: ForgotPasswordPayload): ResponseBody
@@ -186,7 +192,7 @@ interface JobsReportApi {
 
         fun create(): JobsReportApi {
             val loggingInterceptor = HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BASIC
+                level = HttpLoggingInterceptor.Level.BODY
             }
 
             val okHttpClient = OkHttpClient.Builder()

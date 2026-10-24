@@ -553,8 +553,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadNotifications(offset: Int = 0) {
-        val token = userToken
-        if (token.isNullOrBlank()) {
+        val auth = authHeader
+        if (auth.isNullOrBlank()) {
             isNotificationsLoading = false
             isNotificationsLoadingMore = false
             return
@@ -569,7 +569,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val response = api.getNotifications(
-                    auth = "Bearer $token",
+                    auth = auth,
                     limit = 30,
                     offset = offset
                 )
@@ -635,7 +635,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun markAllNotificationsRead() {
         if (isMarkingAllNotifications || unreadNotificationsCount == 0) return
-        val token = userToken ?: return
+        val auth = authHeader ?: return
 
         isMarkingAllNotifications = true
         val snapshot = notificationsList
@@ -648,7 +648,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     put("all", true)
                 }.toString().toRequestBody("application/json".toMediaTypeOrNull())
 
-                api.updateNotifications("Bearer $token", payload)
+                api.updateNotifications(auth, payload)
                 withContext(Dispatchers.Main) {
                     notificationToastMessage = "All marked as read"
                     notificationToastIsError = false
@@ -675,14 +675,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             unreadNotificationsCount = if (read) maxOf(0, unreadNotificationsCount - 1) else unreadNotificationsCount + 1
         }
 
-        val token = userToken ?: return
+        val auth = authHeader ?: return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val payload = JSONObject().apply {
                     put("ids", JSONArray().put(id))
                 }.toString().toRequestBody("application/json".toMediaTypeOrNull())
 
-                api.updateNotifications("Bearer $token", payload)
+                api.updateNotifications(auth, payload)
             } catch (_: Exception) {}
         }
     }
@@ -695,10 +695,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             unreadNotificationsCount = maxOf(0, unreadNotificationsCount - 1)
         }
 
-        val token = userToken ?: return
+        val auth = authHeader ?: return
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                api.deleteNotification("Bearer $token", id)
+                api.deleteNotification(auth, id)
                 withContext(Dispatchers.Main) {
                     notificationToastMessage = "Removed"
                     notificationToastIsError = false
@@ -764,10 +764,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // ============================================================
     // USER AUTH & SESSION (jobsreport_token sync)
     // ============================================================
+    val authHeader: String?
+        get() {
+            val raw = userToken ?: prefs.getString("jobsreport_token", null)
+            val clean = raw?.trim()?.removeSurrounding("\"")?.removePrefix("Bearer ")?.removePrefix("bearer ")?.trim()
+            return if (!clean.isNullOrBlank()) "Bearer $clean" else null
+        }
+
+    val cleanUserToken: String?
+        get() {
+            val raw = userToken ?: prefs.getString("jobsreport_token", null)
+            return raw?.trim()?.removeSurrounding("\"")?.removePrefix("Bearer ")?.removePrefix("bearer ")?.trim()?.takeIf { it.isNotBlank() }
+        }
+
     private fun extractUserIdFromToken(token: String?): String? {
         if (token.isNullOrBlank()) return null
         return try {
-            val parts = token.split(".")
+            val clean = token.trim().removeSurrounding("\"").removePrefix("Bearer ").removePrefix("bearer ").trim()
+            val parts = clean.split(".")
             if (parts.size >= 2) {
                 val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING), Charsets.UTF_8)
                 val json = JSONObject(payload)
@@ -920,8 +934,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
         currentUser = updated
         if (!token.isNullOrBlank()) {
-            userToken = token.trim()
-            prefs.edit().putString("jobsreport_token", token.trim()).apply()
+            val clean = token.trim().removeSurrounding("\"").removePrefix("Bearer ").removePrefix("bearer ").trim()
+            userToken = clean
+            prefs.edit().putString("jobsreport_token", clean).apply()
             loadNotifications(0)
         }
         val isVerifiedInt = if (updated.isUserVerified) 1 else 0
@@ -1050,7 +1065,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun followUserApi(userId: String, shouldFollow: Boolean): Boolean = withContext(Dispatchers.IO) {
         try {
-            val auth = userToken?.let { "Bearer $it" }
+            val auth = authHeader
             if (shouldFollow) {
                 runCatching { api.followUser(auth, userId) }
             } else {
@@ -1063,46 +1078,50 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun saveProfileApi(
-        name: String,
-        headline: String?,
-        bio: String?,
-        work: String?,
-        education: String?,
-        location: String?,
-        website: String?,
-        avatarUrl: String?,
-        coverUrl: String?
+        name: String? = null,
+        headline: String? = null,
+        bio: String? = null,
+        work: String? = null,
+        education: String? = null,
+        location: String? = null,
+        website: String? = null,
+        avatarUrl: String? = null,
+        coverUrl: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
-        val token = userToken
-        if (token.isNullOrBlank()) {
+        val auth = authHeader
+        if (auth.isNullOrBlank()) {
+            android.util.Log.e("AppState", "saveProfileApi: authHeader is null")
+            withContext(Dispatchers.Main) { openAuth() }
             return@withContext false
         }
-        val auth = "Bearer $token"
 
         try {
-            val json = JSONObject().apply {
-                put("name", name)
-                put("headline", headline ?: JSONObject.NULL)
-                put("bio", bio ?: JSONObject.NULL)
-                put("work", work ?: JSONObject.NULL)
-                put("education", education ?: JSONObject.NULL)
-                put("location", location ?: JSONObject.NULL)
-                put("website", website ?: JSONObject.NULL)
-                put("profile_image_url", avatarUrl ?: JSONObject.NULL)
-                put("cover_image_url", coverUrl ?: JSONObject.NULL)
+            val json = JSONObject()
+            val effectiveName = name?.trim()?.takeIf { it.isNotBlank() } ?: currentUser?.name?.trim()?.takeIf { it.isNotBlank() }
+            if (effectiveName != null) {
+                json.put("name", effectiveName)
             }
+            if (headline != null) json.put("headline", if (headline.isBlank()) JSONObject.NULL else headline)
+            if (bio != null) json.put("bio", if (bio.isBlank()) JSONObject.NULL else bio)
+            if (work != null) json.put("work", if (work.isBlank()) JSONObject.NULL else work)
+            if (education != null) json.put("education", if (education.isBlank()) JSONObject.NULL else education)
+            if (location != null) json.put("location", if (location.isBlank()) JSONObject.NULL else location)
+            if (website != null) json.put("website", if (website.isBlank()) JSONObject.NULL else website)
+            if (avatarUrl != null) json.put("profile_image_url", avatarUrl)
+            if (coverUrl != null) json.put("cover_image_url", coverUrl)
+
             val body = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
             val responseBody = api.updateProfile(auth, body)
             val jsonStr = responseBody.string()
             val respJson = JSONObject(jsonStr)
             val userObj = respJson.optJSONObject("user")
 
-            val serverId = userObj?.optString("id") ?: currentUser?.id ?: extractUserIdFromToken(token)
+            val serverId = userObj?.optString("id") ?: currentUser?.id ?: extractUserIdFromToken(cleanUserToken)
 
             withContext(Dispatchers.Main) {
                 updateCurrentUser(
                     id = serverId,
-                    name = userObj?.optString("name", name) ?: name,
+                    name = userObj?.optString("name", effectiveName ?: "User") ?: (effectiveName ?: "User"),
                     username = userObj?.optString("username", currentUser?.username) ?: currentUser?.username,
                     headline = userObj?.optString("headline", headline ?: "") ?: headline,
                     location = userObj?.optString("location", location ?: "") ?: location,
@@ -1115,6 +1134,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             true
+        } catch (e: retrofit2.HttpException) {
+            val errBody = e.response()?.errorBody()?.string() ?: ""
+            android.util.Log.e("AppState", "saveProfileApi HTTP ${e.code()}: $errBody", e)
+            if (e.code() == 401) {
+                withContext(Dispatchers.Main) {
+                    userToken = null
+                    prefs.edit().remove("jobsreport_token").apply()
+                    openAuth()
+                }
+            }
+            false
         } catch (e: Exception) {
             android.util.Log.e("AppState", "saveProfileApi failed", e)
             false
@@ -1123,7 +1153,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun deleteUserJob(jobId: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            val auth = userToken?.let { "Bearer $it" }
+            val auth = authHeader
             runCatching { api.deleteJob(auth, jobId) }
             activeJobs = activeJobs.filter { it.id != jobId }
             true
@@ -1179,51 +1209,68 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun login(email: String, password: String, remember: Boolean = true): com.example.data.AuthResult = withContext(Dispatchers.IO) {
         try {
-            val payload = com.example.data.LoginPayload(email = email.trim(), password = password, remember = remember)
-            val responseBody = runCatching { api.login(payload) }.getOrNull()
-            if (responseBody != null) {
-                val jsonStr = responseBody.string()
-                val json = org.json.JSONObject(jsonStr)
-                val token = json.optString("token", json.optString("accessToken", ""))
-                if (token.isNotBlank()) {
-                    val userObj = json.optJSONObject("user")
-                    val name = userObj?.optString("name") ?: email.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
-                    val username = userObj?.optString("username") ?: email.substringBefore("@")
-                    val avatar = userObj?.optString("profileImageUrl", userObj?.optString("avatar", null))
-                        ?: getDefaultStoryAvatar(name, username)
-                    val userId = userObj?.optString("id", "")?.takeIf { it.isNotBlank() }
-                        ?: extractUserIdFromToken(token)
-                        ?: ""
-                    val isVerifiedVal = userObj?.opt("is_verified") ?: userObj?.opt("isVerified")
+            val json = JSONObject().apply {
+                put("email", email.trim())
+                put("password", password)
+                put("remember", remember)
+            }
+            val body = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
+            val responseBody = try {
+                api.loginRaw(body)
+            } catch (e: retrofit2.HttpException) {
+                val errBody = e.response()?.errorBody()?.string() ?: ""
+                val errMsg = try {
+                    val errJson = JSONObject(errBody)
+                    errJson.optString("message", errJson.optString("error", "Invalid credentials"))
+                } catch (_: Exception) {
+                    "Invalid email or password"
+                }
+                return@withContext com.example.data.AuthResult(success = false, message = errMsg)
+            } catch (e: Exception) {
+                return@withContext com.example.data.AuthResult(success = false, message = e.message ?: "Authentication failed. Please check network.")
+            }
 
-                    withContext(Dispatchers.Main) {
-                        updateCurrentUser(
-                            id = userId,
-                            name = name,
-                            username = username,
-                            email = email,
-                            token = token,
-                            avatarUrl = avatar,
-                            isVerified = isVerifiedVal
-                        )
-                        if (userId.isNotBlank()) {
-                            viewModelScope.launch {
-                                val live = fetchUserProfile(userId)
-                                if (live != null) {
-                                    withContext(Dispatchers.Main) {
-                                        currentUser = live
-                                    }
+            val jsonStr = responseBody.string()
+            val respJson = org.json.JSONObject(jsonStr)
+            val rawToken = respJson.optString("token", respJson.optString("accessToken", ""))
+            val token = rawToken.trim().removeSurrounding("\"").removePrefix("Bearer ").removePrefix("bearer ").trim()
+
+            if (token.isNotBlank()) {
+                val userObj = respJson.optJSONObject("user")
+                val name = userObj?.optString("name") ?: email.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
+                val username = userObj?.optString("username") ?: email.substringBefore("@")
+                val avatar = userObj?.optString("profile_image_url", userObj?.optString("avatar", null))
+                    ?: getDefaultStoryAvatar(name, username)
+                val userId = userObj?.optString("id", "")?.takeIf { it.isNotBlank() }
+                    ?: extractUserIdFromToken(token)
+                    ?: ""
+                val isVerifiedVal = userObj?.opt("is_verified") ?: userObj?.opt("isVerified")
+
+                withContext(Dispatchers.Main) {
+                    updateCurrentUser(
+                        id = userId,
+                        name = name,
+                        username = username,
+                        email = email,
+                        token = token,
+                        avatarUrl = avatar,
+                        isVerified = isVerifiedVal
+                    )
+                    if (userId.isNotBlank()) {
+                        viewModelScope.launch {
+                            val live = fetchUserProfile(userId)
+                            if (live != null) {
+                                withContext(Dispatchers.Main) {
+                                    currentUser = live
                                 }
                             }
                         }
                     }
-                    return@withContext com.example.data.AuthResult(success = true, token = token, message = "Welcome back, $name!")
-                } else {
-                    val errMsg = json.optString("message", json.optString("error", "Invalid credentials. Please check your email and password."))
-                    return@withContext com.example.data.AuthResult(success = false, message = errMsg)
                 }
+                return@withContext com.example.data.AuthResult(success = true, token = token, message = "Welcome back, $name!")
             } else {
-                return@withContext com.example.data.AuthResult(success = false, message = "Invalid email or password. Please try again.")
+                val errMsg = respJson.optString("message", respJson.optString("error", "Invalid credentials. Please check your email and password."))
+                return@withContext com.example.data.AuthResult(success = false, message = errMsg)
             }
         } catch (e: Exception) {
             val msg = e.message ?: "Authentication failed. Please check your network connection and credentials."
@@ -1240,64 +1287,76 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         location: String? = null
     ): com.example.data.AuthResult = withContext(Dispatchers.IO) {
         try {
-            val payload = com.example.data.RegisterPayload(
-                name = name.trim(),
-                email = email.trim(),
-                password = password,
-                username = username?.trim(),
-                headline = headline?.trim(),
-                location = location?.trim()
-            )
-            val responseBody = runCatching { api.register(payload) }.getOrNull()
-            if (responseBody != null) {
-                val jsonStr = responseBody.string()
-                val json = org.json.JSONObject(jsonStr)
-                val token = json.optString("token", json.optString("accessToken", ""))
-                val userObj = json.optJSONObject("user")
-                val resolvedName = userObj?.optString("name", name.trim()) ?: name.trim()
-                val resolvedUsername = userObj?.optString("username", username?.trim() ?: email.substringBefore("@"))
-                    ?: (username?.trim() ?: email.substringBefore("@"))
-                val avatar = userObj?.optString("profileImageUrl", userObj?.optString("avatar", null))
-                    ?: getDefaultStoryAvatar(resolvedName, resolvedUsername)
-                val userId = userObj?.optString("id", "")?.takeIf { it.isNotBlank() }
-                    ?: extractUserIdFromToken(token)
-                    ?: ""
-                val isVerifiedVal = userObj?.opt("is_verified") ?: userObj?.opt("isVerified")
+            val json = JSONObject().apply {
+                put("name", name.trim())
+                put("email", email.trim())
+                put("password", password)
+                if (!username.isNullOrBlank()) put("username", username.trim())
+                if (!headline.isNullOrBlank()) put("headline", headline.trim())
+                if (!location.isNullOrBlank()) put("location", location.trim())
+            }
+            val body = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
+            val responseBody = try {
+                api.registerRaw(body)
+            } catch (e: retrofit2.HttpException) {
+                val errBody = e.response()?.errorBody()?.string() ?: ""
+                val errMsg = try {
+                    val errJson = JSONObject(errBody)
+                    errJson.optString("message", errJson.optString("error", "Registration failed"))
+                } catch (_: Exception) {
+                    "Registration failed"
+                }
+                return@withContext com.example.data.AuthResult(success = false, message = errMsg)
+            } catch (e: Exception) {
+                return@withContext com.example.data.AuthResult(success = false, message = e.message ?: "Registration failed")
+            }
 
-                if (token.isNotBlank()) {
-                    withContext(Dispatchers.Main) {
-                        updateCurrentUser(
-                            id = userId,
-                            name = resolvedName,
-                            username = resolvedUsername,
-                            email = email.trim(),
-                            token = token,
-                            avatarUrl = avatar,
-                            headline = headline?.trim(),
-                            location = location?.trim(),
-                            isVerified = isVerifiedVal
-                        )
-                        if (userId.isNotBlank()) {
-                            viewModelScope.launch {
-                                val live = fetchUserProfile(userId)
-                                if (live != null) {
-                                    withContext(Dispatchers.Main) {
-                                        currentUser = live
-                                    }
+            val jsonStr = responseBody.string()
+            val respJson = org.json.JSONObject(jsonStr)
+            val rawToken = respJson.optString("token", respJson.optString("accessToken", ""))
+            val token = rawToken.trim().removeSurrounding("\"").removePrefix("Bearer ").removePrefix("bearer ").trim()
+            val userObj = respJson.optJSONObject("user")
+            val resolvedName = userObj?.optString("name", name.trim()) ?: name.trim()
+            val resolvedUsername = userObj?.optString("username", username?.trim() ?: email.substringBefore("@"))
+                ?: (username?.trim() ?: email.substringBefore("@"))
+            val avatar = userObj?.optString("profile_image_url", userObj?.optString("avatar", null))
+                ?: getDefaultStoryAvatar(resolvedName, resolvedUsername)
+            val userId = userObj?.optString("id", "")?.takeIf { it.isNotBlank() }
+                ?: extractUserIdFromToken(token)
+                ?: ""
+            val isVerifiedVal = userObj?.opt("is_verified") ?: userObj?.opt("isVerified")
+
+            if (token.isNotBlank()) {
+                withContext(Dispatchers.Main) {
+                    updateCurrentUser(
+                        id = userId,
+                        name = resolvedName,
+                        username = resolvedUsername,
+                        email = email.trim(),
+                        token = token,
+                        avatarUrl = avatar,
+                        headline = headline?.trim(),
+                        location = location?.trim(),
+                        isVerified = isVerifiedVal
+                    )
+                    if (userId.isNotBlank()) {
+                        viewModelScope.launch {
+                            val live = fetchUserProfile(userId)
+                            if (live != null) {
+                                withContext(Dispatchers.Main) {
+                                    currentUser = live
                                 }
                             }
                         }
                     }
-                    return@withContext com.example.data.AuthResult(success = true, token = token, message = "Account created successfully!")
-                } else {
-                    val errMsg = json.optString("message", json.optString("error", "Registration could not be completed."))
-                    return@withContext com.example.data.AuthResult(success = json.optBoolean("success", false), message = errMsg)
                 }
+                return@withContext com.example.data.AuthResult(success = true, token = token, message = "Account created! Welcome, $resolvedName.")
             } else {
-                return@withContext com.example.data.AuthResult(success = false, message = "Registration failed. Please try a different email or try again later.")
+                val errMsg = respJson.optString("message", respJson.optString("error", "Registration failed."))
+                return@withContext com.example.data.AuthResult(success = false, message = errMsg)
             }
         } catch (e: Exception) {
-            return@withContext com.example.data.AuthResult(success = false, message = e.message ?: "Registration error.")
+            return@withContext com.example.data.AuthResult(success = false, message = e.message ?: "Registration failed")
         }
     }
 
@@ -1424,98 +1483,97 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun createStory(payload: CreateStoryPayload): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
-            val authHeader = userToken?.let { "Bearer $it" }
-            val nowIso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
-                timeZone = java.util.TimeZone.getTimeZone("UTC")
-            }.format(java.util.Date())
+        val auth = authHeader
+        if (auth.isNullOrBlank()) {
+            android.util.Log.e("AppState", "createStory: authHeader is null")
+            withContext(Dispatchers.Main) { openAuth() }
+            return@withContext Result.failure(IllegalStateException("Please log in to post a story"))
+        }
 
-            val userObj = currentUser ?: StoryUser(
-                id = "user_${System.currentTimeMillis()}",
-                name = "You",
-                profileImageUrl = getDefaultStoryAvatar("You", "you")
-            )
-
-            val localStory = StoryType(
-                id = "story_${System.currentTimeMillis()}",
-                userId = userObj.id,
-                slug = "story-${System.currentTimeMillis()}",
-                type = payload.type,
-                textContent = payload.textContent,
-                backgroundStyle = payload.backgroundStyle,
-                mediaUrl = payload.mediaUrl,
-                mediaThumb = payload.mediaThumb ?: payload.mediaUrl,
-                expiresAt = payload.expiresAt,
-                createdAt = nowIso,
-                viewsCount = 0,
-                user = userObj
-            )
-
-            // Immediately reflect in UI reel on Main thread
-            withContext(Dispatchers.Main) {
-                stories = listOf(localStory) + stories.filter { it.id != localStory.id }
-            }
-
-            // Sync with backend API
-            try {
-                val json = JSONObject().apply {
-                    put("type", payload.type)
-                    put("expires_at", payload.expiresAt)
-                    if (!payload.textContent.isNullOrBlank()) {
-                        put("text_content", payload.textContent.trim())
-                    }
-                    if (!payload.backgroundStyle.isNullOrBlank()) {
-                        put("background_style", payload.backgroundStyle.trim())
-                    }
-                    if (!payload.mediaUrl.isNullOrBlank()) {
-                        put("media_url", payload.mediaUrl.trim())
-                    }
-                    if (!payload.mediaThumb.isNullOrBlank()) {
-                        put("media_thumb", payload.mediaThumb.trim())
-                    }
+        try {
+            val json = JSONObject().apply {
+                put("type", payload.type)
+                put("expires_at", payload.expiresAt)
+                if (!payload.textContent.isNullOrBlank()) {
+                    put("text_content", payload.textContent.trim())
                 }
-                val body = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
+                if (!payload.backgroundStyle.isNullOrBlank()) {
+                    put("background_style", payload.backgroundStyle.trim())
+                }
+                if (!payload.mediaUrl.isNullOrBlank()) {
+                    put("media_url", payload.mediaUrl.trim())
+                }
+                if (!payload.mediaThumb.isNullOrBlank()) {
+                    put("media_thumb", payload.mediaThumb.trim())
+                }
+            }
+            val body = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
 
-                val responseBody = api.createStoryRaw(authHeader, body)
-                val jsonStr = responseBody.string()
-                val respObj = JSONObject(jsonStr)
+            val responseBody = api.createStoryRaw(auth, body)
+            val jsonStr = responseBody.string()
+            val respObj = JSONObject(jsonStr)
 
-                val storyObj = respObj.optJSONObject("story")
-                if (storyObj != null) {
-                    val serverStory = StoryType(
-                        id = storyObj.optString("id"),
-                        userId = storyObj.optString("user_id", userObj.id),
-                        slug = storyObj.optString("slug", ""),
-                        type = storyObj.optString("type", payload.type),
-                        textContent = storyObj.optString("text_content").takeIf { it.isNotBlank() } ?: payload.textContent,
-                        backgroundStyle = storyObj.optString("background_style").takeIf { it.isNotBlank() } ?: payload.backgroundStyle,
-                        mediaUrl = storyObj.optString("media_url").takeIf { it.isNotBlank() } ?: payload.mediaUrl,
-                        mediaThumb = storyObj.optString("media_thumb").takeIf { it.isNotBlank() } ?: payload.mediaThumb,
-                        createdAt = storyObj.optString("created_at", nowIso),
-                        expiresAt = storyObj.optString("expires_at", payload.expiresAt),
-                        isActive = storyObj.opt("is_active") ?: 1,
-                        viewsCount = storyObj.optInt("views_count", 0),
-                        user = userObj
+            val storyObj = respObj.optJSONObject("story")
+            if (storyObj != null) {
+                val nowIso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }.format(java.util.Date())
+
+                val userObj = currentUser ?: StoryUser(
+                    id = storyObj.optString("user_id", "user_me"),
+                    name = "You",
+                    profileImageUrl = getDefaultStoryAvatar("You", "you")
+                )
+
+                val serverStory = StoryType(
+                    id = storyObj.optString("id"),
+                    userId = storyObj.optString("user_id", userObj.id),
+                    slug = storyObj.optString("slug", ""),
+                    type = storyObj.optString("type", payload.type),
+                    textContent = storyObj.optString("text_content").takeIf { it.isNotBlank() } ?: payload.textContent,
+                    backgroundStyle = storyObj.optString("background_style").takeIf { it.isNotBlank() } ?: payload.backgroundStyle,
+                    mediaUrl = storyObj.optString("media_url").takeIf { it.isNotBlank() } ?: payload.mediaUrl,
+                    mediaThumb = storyObj.optString("media_thumb").takeIf { it.isNotBlank() } ?: payload.mediaThumb,
+                    createdAt = storyObj.optString("created_at", nowIso),
+                    expiresAt = storyObj.optString("expires_at", payload.expiresAt),
+                    isActive = storyObj.opt("is_active") ?: 1,
+                    viewsCount = storyObj.optInt("views_count", 0),
+                    user = userObj
+                )
+                withContext(Dispatchers.Main) {
+                    stories = listOf(serverStory) + stories.filter { it.id != serverStory.id }
+                    currentUser = currentUser?.copy(
+                        storiesCount = (currentUser?.storiesCount ?: 0) + 1
                     )
-                    withContext(Dispatchers.Main) {
-                        stories = listOf(serverStory) + stories.filter { it.id != localStory.id && it.id != serverStory.id }
-                        currentUser = currentUser?.copy(
-                            storiesCount = (currentUser?.storiesCount ?: 0) + 1
-                        )
-                    }
                 }
-                Unit
-            } catch (e: Exception) {
-                android.util.Log.e("AppState", "createStory remote failed", e)
-                throw e
             }
+            Result.success(Unit)
+        } catch (e: retrofit2.HttpException) {
+            val errBody = e.response()?.errorBody()?.string() ?: ""
+            val errMsg = try {
+                JSONObject(errBody).optString("error", "Failed to share story (${e.code()})")
+            } catch (_: Exception) {
+                "Failed to share story (${e.code()})"
+            }
+            android.util.Log.e("AppState", "createStory HTTP ${e.code()}: $errBody", e)
+            if (e.code() == 401) {
+                withContext(Dispatchers.Main) {
+                    userToken = null
+                    prefs.edit().remove("jobsreport_token").apply()
+                    openAuth()
+                }
+            }
+            Result.failure(IllegalStateException(errMsg))
+        } catch (e: Exception) {
+            android.util.Log.e("AppState", "createStory error", e)
+            Result.failure(e)
         }
     }
 
     suspend fun deleteStory(storyId: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            val authHeader = userToken?.let { "Bearer $it" }
-            api.deleteStory(authHeader, storyId)
+            val auth = authHeader
+            api.deleteStory(auth, storyId)
             withContext(Dispatchers.Main) {
                 stories = stories.filter { it.id != storyId }
                 if (viewingStory?.id == storyId) {
@@ -1535,7 +1593,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         thumbMime: String
     ): Result<UploadResponse> = withContext(Dispatchers.IO) {
         runCatching {
-            val authHeader = userToken?.let { "Bearer $it" }
+            val auth = authHeader
 
             val fileReq = mainBytes.toRequestBody(mainMime.toMediaTypeOrNull())
             val filePart = MultipartBody.Part.createFormData("file", mainName, fileReq)
@@ -1550,7 +1608,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val altReq = alt.toRequestBody("text/plain".toMediaTypeOrNull())
             val altPart = MultipartBody.Part.createFormData("altText", null, altReq)
 
-            val responseBody = api.uploadMedia(authHeader, filePart, thumbPart, namePart, altPart)
+            val responseBody = api.uploadMedia(auth, filePart, thumbPart, namePart, altPart)
             val jsonStr = responseBody.string()
             val parsed = uploadResponseAdapter.fromJson(jsonStr)
             parsed ?: run {
@@ -1582,7 +1640,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val altPart = MultipartBody.Part.createFormData("altText", "")
 
             // 3. Upload via existing Retrofit method
-            val auth = userToken?.let { "Bearer $it" }
+            val auth = authHeader
             val resp = api.uploadMedia(auth, filePart, null, namePart, altPart)
 
             // 4. Parse { url }
@@ -1660,9 +1718,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun createCompany(jsonPayload: String): Pair<Boolean, String?> = withContext(Dispatchers.IO) {
         try {
-            val authHeader = userToken?.let { "Bearer $it" }
+            val auth = authHeader
             val reqBody = jsonPayload.toRequestBody("application/json".toMediaTypeOrNull())
-            api.createCompanyRaw(authHeader, reqBody).string()
+            api.createCompanyRaw(auth, reqBody).string()
             Pair(true, null)
         } catch (e: Exception) {
             Pair(false, e.message ?: "Failed to create company")
@@ -1671,10 +1729,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun saveUserWork(companyName: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            val authHeader = userToken?.let { "Bearer $it" } ?: return@withContext false
+            val auth = authHeader ?: return@withContext false
             val json = JSONObject().apply { put("work", companyName.trim()) }
             val reqBody = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
-            api.updateProfile(authHeader, reqBody)
+            api.updateProfile(auth, reqBody)
             withContext(Dispatchers.Main) {
                 currentUser = currentUser?.copy(work = companyName.trim())
                 prefs.edit().putString("user_work", companyName.trim()).apply()
@@ -1691,13 +1749,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         jobId: String?
     ): Pair<Boolean, String?> = withContext(Dispatchers.IO) {
         try {
-            val authHeader = userToken?.let { "Bearer $it" } ?: return@withContext Pair(false, "User not authenticated")
+            val auth = authHeader ?: return@withContext Pair(false, "User not authenticated")
             val reqBody = jsonPayload.toRequestBody("application/json".toMediaTypeOrNull())
             if (isEdit && !jobId.isNullOrBlank()) {
                 val userId = currentUser?.id ?: ""
-                api.updateUserJob(authHeader, userId, reqBody)
+                api.updateUserJob(auth, userId, reqBody)
             } else {
-                api.createUserJob(authHeader, reqBody)
+                api.createUserJob(auth, reqBody)
             }
             withContext(Dispatchers.Main) {
                 fetchDashboardData()

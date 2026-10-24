@@ -351,17 +351,7 @@ fun UserProfilePage(
                 scope.launch {
                     val url = viewModel.uploadImage(context, uri)
                     if (url != null) {
-                        val ok = viewModel.saveProfileApi(
-                            name = displayUser.name,
-                            headline = displayUser.headline,
-                            bio = displayUser.bio,
-                            work = displayUser.work,
-                            education = displayUser.education,
-                            location = displayUser.location,
-                            website = displayUser.website,
-                            avatarUrl = displayUser.profileImageUrl,
-                            coverUrl = url
-                        )
+                        val ok = viewModel.saveProfileApi(coverUrl = url)
                         if (ok) {
                             val updated = viewModel.currentUser ?: user?.copy(coverImageUrl = url)
                             user = updated
@@ -383,17 +373,7 @@ fun UserProfilePage(
                 scope.launch {
                     val url = viewModel.uploadImage(context, uri)
                     if (url != null) {
-                        val ok = viewModel.saveProfileApi(
-                            name = displayUser.name,
-                            headline = displayUser.headline,
-                            bio = displayUser.bio,
-                            work = displayUser.work,
-                            education = displayUser.education,
-                            location = displayUser.location,
-                            website = displayUser.website,
-                            avatarUrl = url,
-                            coverUrl = displayUser.coverImageUrl
-                        )
+                        val ok = viewModel.saveProfileApi(avatarUrl = url)
                         if (ok) {
                             val updated = viewModel.currentUser ?: user?.copy(profileImageUrl = url)
                             user = updated

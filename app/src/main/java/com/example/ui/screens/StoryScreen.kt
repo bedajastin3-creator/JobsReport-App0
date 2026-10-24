@@ -420,14 +420,7 @@ fun GlobalStoryModals(viewModel: AppViewModel) {
                 ),
                 onClose = { viewModel.isCreateStoryOpen = false },
                 onCreate = { payload ->
-                    coroutineScope.launch {
-                        val res = viewModel.createStory(payload)
-                        if (res.isSuccess) {
-                            Toast.makeText(context, "Story shared successfully!", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "Failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
-                        }
-                    }
+                    viewModel.createStory(payload)
                 },
                 onUpload = { mainBytes, mainName, mainMime, thumbBytes, thumbName, thumbMime ->
                     viewModel.uploadMedia(mainBytes, mainName, mainMime, thumbBytes, thumbName, thumbMime)
@@ -1303,7 +1296,7 @@ fun StoryViewer(
 fun CreateStoryModal(
     currentUser: StoryUser,
     onClose: () -> Unit,
-    onCreate: (CreateStoryPayload) -> Unit,
+    onCreate: suspend (CreateStoryPayload) -> Result<Unit>,
     onUpload: suspend (ByteArray, String, String, ByteArray, String, String) -> Result<com.example.data.UploadResponse>
 ) {
     val context = LocalContext.current
@@ -1370,7 +1363,7 @@ fun CreateStoryModal(
 
     val canShare = when (mode) {
         "text" -> textContent.trim().isNotEmpty()
-        "image" -> (!uploadedUrl.isNullOrBlank() || compressedResult != null) && !isUploading
+        "image" -> !uploadedUrl.isNullOrBlank() && !isUploading
         else -> false
     }
 
@@ -1404,8 +1397,13 @@ fun CreateStoryModal(
                     mediaThumb = if (mode == "image") uploadedThumb else null,
                     expiresAt = isoExpires
                 )
-                onCreate(payload)
-                onClose()
+                val res = onCreate(payload)
+                if (res.isSuccess) {
+                    Toast.makeText(context, "Story shared successfully!", Toast.LENGTH_SHORT).show()
+                    onClose()
+                } else {
+                    errorMessage = res.exceptionOrNull()?.message ?: "Failed to share story"
+                }
             } catch (e: Exception) {
                 errorMessage = e.message ?: "Failed to share story"
             } finally {
@@ -1866,7 +1864,8 @@ fun UserProfileModal(
                             .weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp))
                             .background(StoryPrimaryBlue)
                             .clickable {
-                                onSave(name.trim(), username.trim().ifBlank { null }, email.trim().ifBlank { null }, token.trim().ifBlank { null })
+                                val cleanToken = token.trim().removeSurrounding("\"").removePrefix("Bearer ").removePrefix("bearer ").trim().ifBlank { null }
+                                onSave(name.trim(), username.trim().ifBlank { null }, email.trim().ifBlank { null }, cleanToken)
                             },
                         contentAlignment = Alignment.Center
                     ) {
