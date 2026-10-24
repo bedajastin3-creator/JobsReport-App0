@@ -451,7 +451,7 @@ fun StoryReel(
     onViewStory: (StoryType) -> Unit,
     onProfileClick: (String) -> Unit,
     onRequestLogin: () -> Unit,
-    flat: Boolean = false        // ← NEW: no card chrome when true
+    flat: Boolean = false
 ) {
     val active = remember(stories) { stories.filter { !isStoryExpired(it) } }
 
@@ -1297,7 +1297,7 @@ fun StoryViewer(
 }
 
 // ============================================================
-// CREATE STORY MODAL
+// CREATE STORY MODAL — with deadline validation + minDate = tomorrow
 // ============================================================
 @Composable
 fun CreateStoryModal(
@@ -1379,9 +1379,23 @@ fun CreateStoryModal(
         isSharing = true
         errorMessage = null
 
+        // ── Client-side deadline check (mirrors server rule) ──
+        val isoExpires = "${deadlineDate}T23:59:59.000Z"
+        val expiresMs = try {
+            java.time.Instant.parse(isoExpires).toEpochMilli()
+        } catch (e: Exception) {
+            errorMessage = "Invalid deadline"
+            isSharing = false
+            return
+        }
+        if (expiresMs <= System.currentTimeMillis()) {
+            errorMessage = "Deadline must be in the future"
+            isSharing = false
+            return
+        }
+
         coroutineScope.launch {
             try {
-                val isoExpires = "${deadlineDate}T23:59:59.000Z"
                 val payload = CreateStoryPayload(
                     type = mode,
                     textContent = if (mode == "text") textContent.trim() else null,
@@ -1622,7 +1636,11 @@ fun CreateStoryModal(
                                 cal.get(Calendar.YEAR),
                                 cal.get(Calendar.MONTH),
                                 cal.get(Calendar.DAY_OF_MONTH)
-                            ).apply { datePicker.minDate = System.currentTimeMillis() }.show()
+                            ).apply {
+                                // FIX: minimum date is tomorrow, not today.
+                                // Prevents "Deadline must be in the future" rejections from the server.
+                                datePicker.minDate = System.currentTimeMillis() + 24L * 60L * 60L * 1000L
+                            }.show()
                         }
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
