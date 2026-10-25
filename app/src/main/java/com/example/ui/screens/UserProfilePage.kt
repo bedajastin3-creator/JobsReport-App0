@@ -707,7 +707,7 @@ fun UserProfilePage(
                                             .background(Color.White.copy(alpha = 0.04f))
                                             .border(1.dp, CardBorderColor, RoundedCornerShape(12.dp))
                                             .clickable {
-                                                if (viewModel.userToken != null) viewModel.isCreateStoryOpen = true else viewModel.openAuth()
+                                                if (viewModel.isLoggedIn) viewModel.isCreateStoryOpen = true else viewModel.openAuth()
                                             },
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -925,7 +925,7 @@ fun UserProfilePage(
                                     subtitle = if (isOwnProfile) "Share your first story — job wins, tips, updates" else "This user hasn't shared any stories yet",
                                     actionLabel = if (isOwnProfile) "Create Story" else null,
                                     onAction = {
-                                        if (viewModel.userToken != null) viewModel.isCreateStoryOpen = true else viewModel.openAuth()
+                                        if (viewModel.isLoggedIn) viewModel.isCreateStoryOpen = true else viewModel.openAuth()
                                     }
                                 )
                             }

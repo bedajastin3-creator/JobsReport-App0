@@ -764,46 +764,85 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // ============================================================
     // USER AUTH & SESSION (jobsreport_token sync)
     // ============================================================
+    fun sanitizeJwtToken(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        var t = raw.trim()
+        var changed = true
+        while (changed) {
+            val prev = t
+            t = t.removeSurrounding("\"")
+                .removeSurrounding("'")
+                .trim()
+            if (t.startsWith("Bearer ", ignoreCase = true)) {
+                t = t.substring(7).trim()
+            }
+            changed = (t != prev)
+        }
+        return t.takeIf { it.isNotBlank() }
+    }
+
     val authHeader: String?
         get() {
             val raw = userToken ?: prefs.getString("jobsreport_token", null)
-            val clean = raw?.trim()?.removeSurrounding("\"")?.removePrefix("Bearer ")?.removePrefix("bearer ")?.trim()
+            val clean = sanitizeJwtToken(raw)
             return if (!clean.isNullOrBlank()) "Bearer $clean" else null
         }
 
     val cleanUserToken: String?
         get() {
             val raw = userToken ?: prefs.getString("jobsreport_token", null)
-            return raw?.trim()?.removeSurrounding("\"")?.removePrefix("Bearer ")?.removePrefix("bearer ")?.trim()?.takeIf { it.isNotBlank() }
+            return sanitizeJwtToken(raw)
         }
 
-    private fun extractUserIdFromToken(token: String?): String? {
-        if (token.isNullOrBlank()) return null
+    val isLoggedIn: Boolean
+        get() = !cleanUserToken.isNullOrBlank()
+
+    private fun extractTokenClaims(token: String?): JSONObject? {
+        val clean = sanitizeJwtToken(token) ?: return null
         return try {
-            val clean = token.trim().removeSurrounding("\"").removePrefix("Bearer ").removePrefix("bearer ").trim()
             val parts = clean.split(".")
             if (parts.size >= 2) {
                 val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING), Charsets.UTF_8)
-                val json = JSONObject(payload)
-                json.optString("sub").takeIf { it.isNotBlank() } ?: json.optString("id").takeIf { it.isNotBlank() }
+                JSONObject(payload)
             } else null
         } catch (_: Exception) {
             null
         }
     }
 
+    private fun extractUserIdFromToken(token: String?): String? {
+        val json = extractTokenClaims(token) ?: return null
+        return json.optString("sub").takeIf { it.isNotBlank() } ?: json.optString("id").takeIf { it.isNotBlank() }
+    }
+
+    private fun extractEmailFromToken(token: String?): String? {
+        val json = extractTokenClaims(token) ?: return null
+        return json.optString("email").takeIf { it.isNotBlank() }
+    }
+
     private fun loadCurrentUser() {
-        userToken = prefs.getString("jobsreport_token", null)
+        val rawToken = prefs.getString("jobsreport_token", null)
+        val clean = sanitizeJwtToken(rawToken)
+        userToken = clean
+        if (clean != rawToken && clean != null) {
+            prefs.edit().putString("jobsreport_token", clean).apply()
+        }
+
         var savedId = prefs.getString("user_id", null)
-        val extractedId = extractUserIdFromToken(userToken)
+        val extractedId = extractUserIdFromToken(clean)
         if (!extractedId.isNullOrBlank() && (savedId.isNullOrBlank() || savedId.startsWith("usr_"))) {
             savedId = extractedId
             prefs.edit().putString("user_id", extractedId).apply()
         }
-        val savedName = prefs.getString("user_name", null)
-        val savedUsername = prefs.getString("user_username", null)
+
+        val extractedEmail = extractEmailFromToken(clean)
+        var savedName = prefs.getString("user_name", null)
+        if (savedName.isNullOrBlank() && !extractedEmail.isNullOrBlank()) {
+            savedName = extractedEmail.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
+        }
+        val savedUsername = prefs.getString("user_username", null) ?: extractedEmail?.substringBefore("@")
         val savedAvatar = prefs.getString("user_avatar", null)
-        val savedEmail = prefs.getString("user_email", null)
+        val savedEmail = prefs.getString("user_email", null) ?: extractedEmail
         val savedHeadline = prefs.getString("user_headline", null)
         val savedLocation = prefs.getString("user_location", null)
         val savedBio = prefs.getString("user_bio", null)
@@ -813,10 +852,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val savedCover = prefs.getString("user_cover", null)
         val isVerifiedInt = prefs.getInt("user_is_verified", 0)
 
-        if (!userToken.isNullOrBlank() && !savedId.isNullOrBlank() && !savedName.isNullOrBlank()) {
+        val effectiveId = savedId ?: extractedId ?: ""
+        val effectiveName = savedName?.takeIf { it.isNotBlank() } ?: "User"
+
+        if (!clean.isNullOrBlank() && effectiveId.isNotBlank()) {
             currentUser = StoryUser(
-                id = savedId,
-                name = savedName,
+                id = effectiveId,
+                name = effectiveName,
                 username = savedUsername,
                 email = savedEmail,
                 profileImageUrl = savedAvatar,
@@ -838,7 +880,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             )
             // Proactively refresh own user profile from live API
             viewModelScope.launch {
-                val liveUser = fetchUserProfile(savedId)
+                val liveUser = fetchUserProfile(effectiveId)
                 if (liveUser != null) {
                     withContext(Dispatchers.Main) {
                         currentUser = liveUser
@@ -934,9 +976,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
         currentUser = updated
         if (!token.isNullOrBlank()) {
-            val clean = token.trim().removeSurrounding("\"").removePrefix("Bearer ").removePrefix("bearer ").trim()
+            val clean = sanitizeJwtToken(token)
             userToken = clean
-            prefs.edit().putString("jobsreport_token", clean).apply()
+            if (clean != null) {
+                prefs.edit().putString("jobsreport_token", clean).apply()
+            }
             loadNotifications(0)
         }
         val isVerifiedInt = if (updated.isUserVerified) 1 else 0
@@ -1091,7 +1135,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val auth = authHeader
         if (auth.isNullOrBlank()) {
             android.util.Log.e("AppState", "saveProfileApi: authHeader is null")
-            withContext(Dispatchers.Main) { openAuth() }
             return@withContext false
         }
 
@@ -1137,13 +1180,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: retrofit2.HttpException) {
             val errBody = e.response()?.errorBody()?.string() ?: ""
             android.util.Log.e("AppState", "saveProfileApi HTTP ${e.code()}: $errBody", e)
-            if (e.code() == 401) {
-                withContext(Dispatchers.Main) {
-                    userToken = null
-                    prefs.edit().remove("jobsreport_token").apply()
-                    openAuth()
-                }
-            }
             false
         } catch (e: Exception) {
             android.util.Log.e("AppState", "saveProfileApi failed", e)
@@ -1486,7 +1522,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val auth = authHeader
         if (auth.isNullOrBlank()) {
             android.util.Log.e("AppState", "createStory: authHeader is null")
-            withContext(Dispatchers.Main) { openAuth() }
             return@withContext Result.failure(IllegalStateException("Please log in to post a story"))
         }
 
@@ -1556,13 +1591,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 "Failed to share story (${e.code()})"
             }
             android.util.Log.e("AppState", "createStory HTTP ${e.code()}: $errBody", e)
-            if (e.code() == 401) {
-                withContext(Dispatchers.Main) {
-                    userToken = null
-                    prefs.edit().remove("jobsreport_token").apply()
-                    openAuth()
-                }
-            }
             Result.failure(IllegalStateException(errMsg))
         } catch (e: Exception) {
             android.util.Log.e("AppState", "createStory error", e)

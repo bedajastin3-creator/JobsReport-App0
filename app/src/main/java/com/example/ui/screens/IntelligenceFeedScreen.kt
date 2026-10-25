@@ -217,7 +217,7 @@ fun IntelligenceFeedScreen(viewModel: AppViewModel) {
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .clickable {
-                                if (viewModel.userToken != null) {
+                                if (viewModel.isLoggedIn) {
                                     viewModel.isCreateStoryOpen = true
                                 } else {
                                     viewModel.openAuth()
@@ -275,7 +275,7 @@ fun IntelligenceFeedScreen(viewModel: AppViewModel) {
                 isUserVerified = { uid, u -> viewModel.isUserVerified(uid, u) },
                 authorProvider = { uid, u -> viewModel.getResolvedUser(uid, u) },
                 onCreateStory = {
-                    if (viewModel.currentUser != null) {
+                    if (viewModel.isLoggedIn) {
                         viewModel.isCreateStoryOpen = true
                     } else {
                         viewModel.openAuth()

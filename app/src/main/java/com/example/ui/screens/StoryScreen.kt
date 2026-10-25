@@ -247,7 +247,7 @@ fun StoryScreen(viewModel: AppViewModel) {
                 isUserVerified = { uid, u -> viewModel.isUserVerified(uid, u) },
                 authorProvider = { uid, u -> viewModel.getResolvedUser(uid, u) },
                 onCreateStory = {
-                    if (viewModel.userToken != null) {
+                    if (viewModel.isLoggedIn) {
                         viewModel.isCreateStoryOpen = true
                     } else {
                         viewModel.openAuth()
@@ -409,24 +409,19 @@ fun GlobalStoryModals(viewModel: AppViewModel) {
 
     // CREATE STORY MODAL
     if (viewModel.isCreateStoryOpen) {
-        if (viewModel.userToken == null) {
-            viewModel.isCreateStoryOpen = false
-            viewModel.openAuth()
-        } else {
-            CreateStoryModal(
-                currentUser = viewModel.currentUser ?: StoryUser(
-                    id = "anon",
-                    name = "User"
-                ),
-                onClose = { viewModel.isCreateStoryOpen = false },
-                onCreate = { payload ->
-                    viewModel.createStory(payload)
-                },
-                onUpload = { mainBytes, mainName, mainMime, thumbBytes, thumbName, thumbMime ->
-                    viewModel.uploadMedia(mainBytes, mainName, mainMime, thumbBytes, thumbName, thumbMime)
-                }
-            )
-        }
+        CreateStoryModal(
+            currentUser = viewModel.currentUser ?: StoryUser(
+                id = "anon",
+                name = "User"
+            ),
+            onClose = { viewModel.isCreateStoryOpen = false },
+            onCreate = { payload ->
+                viewModel.createStory(payload)
+            },
+            onUpload = { mainBytes, mainName, mainMime, thumbBytes, thumbName, thumbMime ->
+                viewModel.uploadMedia(mainBytes, mainName, mainMime, thumbBytes, thumbName, thumbMime)
+            }
+        )
     }
 }
 
